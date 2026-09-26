@@ -1,0 +1,5 @@
+Options -Indexes
+
+<FilesMatch "^(db|index)\.php$">
+    Require all denied
+</FilesMatch>
