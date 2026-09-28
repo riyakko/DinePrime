@@ -1,27 +1,79 @@
-import { useEffect, useMemo, useState } from 'react'
+import { createContext, useEffect, useMemo, useState } from 'react'
 import { getSession, loginUser, logoutUser, registerUser, updateProfile } from '../api'
-import { AuthContext } from './auth-context'
+
+export const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)
+  // Synchronously restore user from localStorage to prevent logout flash on reload
+  const [user, setUser] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('dinePrimeUser')
+      return savedUser ? JSON.parse(savedUser) : null
+    } catch {
+      return null
+    }
+  })
   const [loading, setLoading] = useState(true)
 
+  const setPersistedUser = (userData) => {
+    setUser(userData)
+    if (userData) {
+      localStorage.setItem('dinePrimeUser', JSON.stringify(userData))
+    } else {
+      localStorage.removeItem('dinePrimeUser')
+    }
+  }
+
+  // Verify backend session on mount
   useEffect(() => {
-    getSession().then((data) => setUser(data.authenticated ? data.user : null)).catch(() => setUser(null)).finally(() => setLoading(false))
+    getSession()
+      .then((data) => {
+        if (data.authenticated && data.user) {
+          setPersistedUser(data.user)
+        } else {
+          setPersistedUser(null)
+        }
+      })
+      .catch(() => {
+        // Retain local state if server is temporarily unreachable
+      })
+      .finally(() => setLoading(false))
   }, [])
 
-  const value = useMemo(() => ({
-    user,
-    role: user?.role || 'customer',
-    isAuthenticated: Boolean(user),
-    isStaff: user?.role === 'staff' || user?.role === 'admin',
-    loading,
-    login: async (credentials) => { const data = await loginUser(credentials); setUser(data.user); return data.user },
-    register: async (details) => { const data = await registerUser(details); setUser(data.user); return data.user },
-    updateProfile: async (details) => { const data = await updateProfile(details); setUser(data.user); return data.user },
-    logout: async () => { await logoutUser(); setUser(null) },
-  }), [loading, user])
+  const value = useMemo(() => {
+    const normalizedRole = (user?.role || 'customer').toLowerCase()
+    const isStaff = ['admin', 'staff', 'manager', 'kitchen'].includes(normalizedRole)
+
+    return {
+      user,
+      role: normalizedRole,
+      isAuthenticated: Boolean(user),
+      isStaff,
+      loading,
+      login: async (credentials) => {
+        const data = await loginUser(credentials)
+        setPersistedUser(data.user)
+        return data.user
+      },
+      register: async (details) => {
+        const data = await registerUser(details)
+        setPersistedUser(data.user)
+        return data.user
+      },
+      updateProfile: async (details) => {
+        const data = await updateProfile(details)
+        setPersistedUser(data.user)
+        return data.user
+      },
+      logout: async () => {
+        try {
+          await logoutUser()
+        } finally {
+          setPersistedUser(null)
+        }
+      },
+    }
+  }, [loading, user])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
-

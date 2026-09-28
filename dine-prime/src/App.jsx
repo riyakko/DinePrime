@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import './App.css'
 import { checkTableAvailability, createMenuItem, deleteMenuItem, getCategories, getCustomerOrders, getMenuItems, getReservations, getStaffReservations, placeOrder as submitOrder, submitReservation, updateMenuItem, updateOrderStatus, updateReservationStatus } from './api'
-import useAuth from './hooks/useAuth'
 import ProtectedRoute from './components/ProtectedRoute'
 import MenuItemModal, { ConfirmModal } from './components/staff/MenuItemModal'
 import KitchenDisplay from './components/staff/KitchenDisplay'
 import Analytics from './components/staff/Analytics'
 import EWalletQRModal from './EWalletQRModal';
+import { useAuth } from './hooks/useAuth'
 
 const customerNavItems = ['Home', 'Menu', 'Order', 'Reservations']
 const staffNavItems = ['Dashboard', 'Orders', 'Kitchen Display', 'Analytics', 'Reservation management', 'Menu management', 'Inventory']
@@ -17,7 +17,17 @@ const routeSlugs = {
   Dashboard: 'staff-dashboard', Orders: 'staff-orders', 'Kitchen Display': 'staff-kds', Analytics: 'staff-analytics', 'Reservation management': 'staff-reservations', 'Menu management': 'staff-menu', Inventory: 'staff-inventory',
 }
 
-const routeFromHash = () => Object.keys(routeSlugs).find((route) => routeSlugs[route] === window.location.hash.slice(1)) || 'Home'
+const routeFromHash = (isStaff = false) => {
+  const currentSlug = window.location.hash.slice(1)
+  const matchedRoute = Object.keys(routeSlugs).find((route) => routeSlugs[route] === currentSlug)
+
+  if (matchedRoute) {
+    return matchedRoute
+  }
+
+  // Fallback defaults if hash is empty or unrecognized
+  return isStaff ? 'Dashboard' : 'Home'
+}
 const fallbackImage = 'https://images.unsplash.com/photo-1498837167922-ddd27525d352?auto=format&fit=crop&w=1000&q=80'
 const CART_STORAGE_KEY = 'dineprime_cart'
 const LEGACY_CART_KEYS = ['dinePrimeCart', 'cart']
@@ -122,20 +132,32 @@ function App() {
   const refreshReservations = () => getStaffReservations().then((data) => setStaffReservations(data.reservations || [])).catch((error) => setActionError(errorMessage(error, 'Reservations could not be refreshed.')))
 
   useEffect(() => {
-    const handleHashChange = () => {
-      const requestedRoute = routeFromHash()
-      if (staffRoutes.has(requestedRoute) && !isStaff) {
-        window.location.hash = routeSlugs.Home
-        setView('Home')
-        setAuthOpen(true)
-        return
-      }
-      setView(requestedRoute)
+  const handleHashChange = () => {
+    let requestedRoute = routeFromHash(isStaff)
+
+    // Security guard: If a non-staff user attempts to view a staff route
+    if (staffRoutes.has(requestedRoute) && !isStaff) {
+      window.location.hash = routeSlugs.Home
+      setView('Home')
+      setAuthOpen(true)
+      return
     }
-    window.addEventListener('hashchange', handleHashChange)
-    handleHashChange()
-    return () => window.removeEventListener('hashchange', handleHashChange)
-  }, [isStaff])
+
+    // Staff Guard: If a staff/admin user is on 'Home' or empty hash, direct them to 'Dashboard'
+    if (isStaff && (requestedRoute === 'Home' || !window.location.hash)) {
+      window.location.hash = routeSlugs.Dashboard
+      setView('Dashboard')
+      return
+    }
+
+    setView(requestedRoute)
+  }
+
+  window.addEventListener('hashchange', handleHashChange)
+  handleHashChange() // Run immediately on mount / isStaff state change
+
+  return () => window.removeEventListener('hashchange', handleHashChange)
+}, [isStaff])
 
 const addToCart = (item) => {
     if (!item.available || item.stockQuantity < 1) { 
@@ -1174,34 +1196,390 @@ useEffect(() => {
   return <section className="reservation-page content-width"><div className="section-heading"><p className="eyebrow">A SEAT AT THE TABLE</p><h1>Reserve a<br /><em>moment.</em></h1><p className="muted">Choose your date, time, table, and any dishes<br />you would like waiting when you arrive.</p></div><div className="reservation-layout"><div className="reservation-form"><div className="form-row"><label>Date<input type="date" min={tomorrow} value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Time<select value={time} onChange={(event) => setTime(event.target.value)}>{timeSlots.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div><label>Party size<div className="segmented">{[2, 3, 4, 5].map((size) => <button key={size} className={partySize === size ? 'chosen' : ''} onClick={() => setPartySize(size)}>{size === 5 ? '5+' : `${size} guests`}</button>)}</div></label><p className="eyebrow table-label">AVAILABLE TABLES <span>{loading ? 'CHECKING...' : 'SELECT ONE'}</span></p><div className="table-map live-table-map">{tables.map((table) => <button key={table.id} disabled={table.status !== 'Available' || !table.eligible} className={`table ${table.capacity === 2 ? 'round' : 'square'} ${selectedTable?.id === table.id ? 'chosen' : ''} ${table.status === 'Reserved' || !table.eligible ? 'occupied' : ''}`} onClick={() => setSelectedTable(table)}>{table.table_number}<small>{table.capacity} seats</small><small>{table.status === 'Reserved' ? 'Reserved' : !table.eligible ? 'Too small' : table.location_description}</small></button>)}</div><div className="legend"><span>Available</span><span>Selected</span><span>Reserved</span></div><div className="optional"><p className="eyebrow">OPTIONAL ADD-ON</p><b>Pre-order for the table</b><small>Choose something to have waiting when you arrive.</small><div className="addon-list">{menuItems.filter((item) => item.available && item.stockQuantity > 0).slice(0, 4).map((item) => <label key={item.id}><input type="checkbox" checked={addOns.some((entry) => entry.menu_item_id === item.id)} onChange={() => toggleAddOn(item)} />{item.name}<span>${item.price}</span></label>)}</div></div>{message && <p className="inline-error" role="alert">{message}</p>}</div><aside className="reservation-summary"><p className="eyebrow">YOUR RESERVATION</p><h2>{date}</h2><hr /><div><span>Time</span><b>{timeSlots.find(([value]) => value === time)?.[1] || time}</b></div><div><span>Party</span><b>{partySize} guests</b></div><div><span>Table</span><b>{selectedTable ? `${selectedTable.table_number} · ${selectedTable.location_description}` : 'Select a table'}</b></div><div><span>Add-ons</span><b>${addonTotal.toFixed(2)}</b></div>{addOns.map((item) => <div className="summary-row" key={item.menu_item_id}><span>{item.name}</span><b>${item.price}</b></div>)}<button className="button button-dark full-width" disabled={submitting} onClick={reserve}>{submitting ? 'Submitting...' : 'Reserve table →'}</button><button className="quiet-link" onClick={() => goTo('Home')}>← Return to dining</button></aside></div></section>
 }
 
-function StaffDashboard({ view, navigate, menuItems, categories, orders, reservations, onMenuChange, onStatusChange, onReservationChange, onError }) {
-  const isMenu = view === 'Menu management'
-  const isReservations = view === 'Reservation management'
-  const isInventory = view === 'Inventory'
-  return <section className="staff-page content-width"><div className="staff-heading"><div><p className="eyebrow">DINE PRIME · OPERATIONS</p><h1>{view === 'Dashboard' ? <>Good evening,<br /><em>team.</em></> : view}</h1><p className="muted">Thursday, October 24 · Service begins at 5:30 PM</p></div><button className="button button-dark" onClick={() => navigate(isMenu ? 'Menu management' : isReservations ? 'Reservation management' : 'Orders')}>{isMenu ? 'Add menu item +' : isReservations ? 'Refresh reservations →' : 'View all orders →'}</button></div>{view === 'Dashboard' && <><div className="staff-metrics"><Metric label="Today’s orders" value={orders.length} detail="From the live order queue" /><Metric label="Pending orders" value={orders.filter((order) => order.status === 'Pending').length} detail="Need confirmation" /><Metric label="Revenue" value={`$${orders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0).toFixed(2)}`} detail="Loaded from MySQL" /><Metric label="Low stock" value={menuItems.filter((item) => item.stockQuantity < 5).length} detail="Review inventory" /></div><div className="staff-columns"><StaffOrderTable orders={orders.slice(0, 5)} navigate={navigate} onStatusChange={onStatusChange} onError={onError} /><StaffPanel title="Service pulse"><div className="pulse-row"><span>Kitchen</span><b>Live queue</b><i className="pulse-good" /></div><div className="pulse-row"><span>Front of house</span><b>{orders.length} orders</b><i className="pulse-warn" /></div><div className="pulse-row"><span>Inventory</span><b>{menuItems.length} menu items</b><i className="pulse-good" /></div></StaffPanel></div></>}{view === 'Orders' && <StaffOrderTable orders={orders} navigate={navigate} detailed onStatusChange={onStatusChange} onError={onError} />}{isReservations && <StaffReservations reservations={reservations} onStatusChange={onReservationChange} onError={onError} />}{isMenu && <MenuManagement items={menuItems} categories={categories} onMenuChange={onMenuChange} onError={onError} />}{isInventory && <InventoryManagement items={menuItems} />}</section>
+function StaffDashboard({ view, navigate, menuItems = [], categories = [], orders = [], reservations = [], onMenuChange, onStatusChange, onReservationChange, onError }) {
+  const isMenu = view === 'Menu management';
+  const isReservations = view === 'Reservation management';
+  const isInventory = view === 'Inventory';
+
+  // Date boundaries for metrics
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const dayOfWeek = now.getDay();
+  const distanceToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - distanceToMonday);
+
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  // Revenue aggregations
+  const totalRevenue = orders.reduce((sum, order) => {
+    if (order.status === 'Cancelled' || order.status === 'cancelled') return sum;
+    return sum + Number(order.total_amount || 0);
+  }, 0);
+
+  const todayOrders = orders.filter((order) => {
+    if (!order.created_at) return false;
+    const orderDate = new Date(order.created_at.replace(' ', 'T'));
+    return orderDate >= startOfToday;
+  });
+
+  const pendingOrdersCount = orders.filter((order) => order.status === 'Pending' || order.status === 'pending').length;
+  const lowStockCount = menuItems.filter((item) => (item.stockQuantity ?? item.stock_quantity ?? 0) < 5).length;
+
+  return (
+    <section className="staff-page content-width">
+      <div className="staff-heading">
+        <div>
+          <p className="eyebrow">DINE PRIME · OPERATIONS</p>
+          <h1>
+            {view === 'Dashboard' ? (
+              <>
+                Good evening,<br />
+                <em>team.</em>
+              </>
+            ) : (
+              view
+            )}
+          </h1>
+          <p className="muted">
+            {now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} · Service in progress
+          </p>
+        </div>
+        <button
+          className="button button-dark"
+          onClick={() => navigate(isMenu ? 'Menu management' : isReservations ? 'Reservation management' : 'Orders')}
+        >
+          {isMenu ? 'Add menu item +' : isReservations ? 'Refresh reservations →' : 'View all orders →'}
+        </button>
+      </div>
+
+      {view === 'Dashboard' && (
+        <>
+          <div className="staff-metrics">
+            <Metric label="Today’s orders" value={todayOrders.length} detail="From live queue today" />
+            <Metric label="Pending orders" value={pendingOrdersCount} detail="Need confirmation" />
+            <Metric label="Revenue" value={`$${totalRevenue.toFixed(2)}`} detail="Total revenue" />
+            <Metric label="Low stock" value={lowStockCount} detail="Review inventory" />
+          </div>
+          <div className="staff-columns">
+            <StaffOrderTable orders={orders.slice(0, 5)} navigate={navigate} onStatusChange={onStatusChange} onError={onError} />
+            <StaffPanel title="Service pulse">
+              <div className="pulse-row">
+                <span>Kitchen</span>
+                <b>Live queue</b>
+                <i className="pulse-good" />
+              </div>
+              <div className="pulse-row">
+                <span>Front of house</span>
+                <b>{orders.length} orders</b>
+                <i className="pulse-warn" />
+              </div>
+              <div className="pulse-row">
+                <span>Inventory</span>
+                <b>{menuItems.length} menu items</b>
+                <i className="pulse-good" />
+              </div>
+            </StaffPanel>
+          </div>
+        </>
+      )}
+
+      {view === 'Orders' && <StaffOrderTable orders={orders} navigate={navigate} detailed onStatusChange={onStatusChange} onError={onError} />}
+      {isReservations && <StaffReservations reservations={reservations} onStatusChange={onReservationChange} onError={onError} />}
+      {isMenu && <MenuManagement items={menuItems} categories={categories} onMenuChange={onMenuChange} onError={onError} />}
+      {isInventory && <InventoryManagement items={menuItems} />}
+    </section>
+  );
 }
 
-function StaffReservations({ reservations, onStatusChange, onError }) { const statuses = ['Pending', 'Confirmed', 'Cancelled', 'Completed']; const change = (id, status) => updateReservationStatus(id, status).then(onStatusChange).catch((error) => onError(errorMessage(error, 'Reservation status could not be updated.'))); return <StaffPanel title="Reservation confirmations"><div className="staff-table"><div className="staff-table-row table-header"><span>Guest</span><span>When</span><span>Table</span><span>Status</span></div>{reservations.length ? reservations.map((reservation) => <div className="staff-table-row" key={reservation.id}><span><b>{reservation.customer_name}</b><small>{reservation.customer_email}</small></span><span>{reservation.reservation_date}<small>{reservation.reservation_time} · {reservation.party_size} guests</small></span><span>{reservation.table_number}<small>{reservation.location_description}</small></span><select className="status" value={reservation.status} onChange={(event) => change(reservation.id, event.target.value)} aria-label={`Status for reservation ${reservation.id}`}>{statuses.map((status) => <option key={status}>{status}</option>)}</select>{reservation.add_ons?.length ? <small className="reservation-addons">Add-ons: {reservation.add_ons.map((item) => `${item.quantity} × ${item.name}`).join(', ')}</small> : null}</div>) : <p className="inline-state">No reservations found.</p>}</div></StaffPanel> }
+function StaffReservations({ reservations = [], onStatusChange, onError }) {
+  const statuses = ['Pending', 'Confirmed', 'Cancelled', 'Completed'];
+  const change = (id, status) =>
+    updateReservationStatus(id, status)
+      .then(onStatusChange)
+      .catch((error) => onError(errorMessage(error, 'Reservation status could not be updated.')));
 
-function Metric({ label, value, detail }) { return <article className="staff-metric"><p className="eyebrow">{label}</p><strong>{value}</strong><span>{detail}</span></article> }
-function StaffPanel({ title, children }) { return <section className="staff-panel"><div className="staff-panel-header"><p className="eyebrow">{title}</p><span className="plain-action" aria-hidden="true">···</span></div>{children}</section> }
-function StaffOrderTable({ orders, navigate, detailed = false, onStatusChange, onError }) { const statuses = ['Pending', 'Confirmed', 'Preparing', 'Ready', 'Completed', 'Cancelled']; const changeStatus = (id, status) => updateOrderStatus(id, status).then(onStatusChange).catch((error) => onError(errorMessage(error, 'Order status could not be updated.'))); return <StaffPanel title={detailed ? 'All orders' : 'Live orders'}><div className="staff-table"><div className="staff-table-row table-header"><span>Order</span><span>Guest</span><span>Details</span><span>Status</span></div>{orders.length ? orders.map((order) => <div className="staff-table-row" key={order.id} onClick={() => navigate('Orders')}><span><b>#{order.id}</b><small>${Number(order.total_amount || 0).toFixed(2)}</small></span><span>{order.customer_name}<small>{order.customer_email}</small></span><span>{order.items?.length || 0} items</span><select className={`status status-${order.status.toLowerCase()}`} value={order.status} onClick={(event) => event.stopPropagation()} onChange={(event) => changeStatus(order.id, event.target.value)} aria-label={`Status for order ${order.id}`}>{statuses.map((status) => <option key={status}>{status}</option>)}</select></div>) : <p className="inline-state">No orders found.</p>}</div></StaffPanel> }
-function MenuManagement({ items, categories, onMenuChange, onError }) {
-  const [search, setSearch] = useState('')
-  const [category, setCategory] = useState('all')
-  const [editing, setEditing] = useState(null)
-  const [deleting, setDeleting] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const filteredItems = items.filter((item) => (category === 'all' || String(item.category_id) === category) && `${item.name} ${item.description}`.toLowerCase().includes(search.toLowerCase()))
-  const save = async (form) => { setBusy(true); try { if (editing) { await updateMenuItem(editing.id, form) } else { await createMenuItem(form) } await onMenuChange() } catch (error) { throw new Error(errorMessage(error, 'Menu item could not be saved.')) } finally { setBusy(false) } }
-  const remove = async () => { setBusy(true); try { await deleteMenuItem(deleting.id); setDeleting(null); await onMenuChange() } catch (error) { onError(errorMessage(error, 'Menu item could not be deleted.')) } finally { setBusy(false) } }
-  const toggleAvailability = (item) => updateMenuItem(item.id, { is_available: !item.available }).then(onMenuChange).catch((error) => onError(errorMessage(error, 'Availability could not be updated.')))
-  const updateStock = (item, value) => { const stock = Number(value); if (!Number.isInteger(stock) || stock < 0) { onError('Stock quantity must be a whole number of zero or more.'); return } updateMenuItem(item.id, { stock_quantity: stock, is_available: stock > 0 && item.available }).then(onMenuChange).catch((error) => onError(errorMessage(error, 'Stock could not be updated.'))) }
-  return <><StaffPanel title="Menu management"><div className="management-toolbar"><div className="management-filters"><input className="staff-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search menu..." aria-label="Search menu" /><select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Filter by category"><option value="all">All categories</option>{categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div><button className="button button-dark" onClick={() => setEditing({})}>Add menu item <span>+</span></button></div>{filteredItems.length ? filteredItems.map((item) => <div className="management-row menu-management-row" key={item.id}><div className={`management-thumb ${item.tone}`} /><div><b>{item.name}</b><small>{item.category} · ${Number(item.price).toFixed(2)}</small></div><input className="stock-input" type="number" min="0" step="1" value={item.stockQuantity} onChange={(event) => updateStock(item, event.target.value)} aria-label={`${item.name} stock`} /><button className={`status ${item.available ? 'status-live' : 'status-sold'}`} onClick={() => toggleAvailability(item)}>{item.available ? 'Live' : 'Unavailable'}</button><button className="plain-action" onClick={() => setEditing(item)}>Edit</button><button className="plain-action danger" onClick={() => setDeleting(item)}>Delete</button></div>) : <p className="inline-state">No menu items match your filters.</p>}</StaffPanel>{editing && <MenuItemModal item={editing.id ? editing : null} categories={categories} onClose={() => setEditing(null)} onSave={save} />}{deleting && <ConfirmModal item={deleting} busy={busy} onClose={() => setDeleting(null)} onConfirm={remove} />}</>
+  return (
+    <StaffPanel title="Reservation confirmations">
+      <div className="staff-table">
+        <div className="staff-table-row table-header">
+          <span>Guest</span>
+          <span>When</span>
+          <span>Table</span>
+          <span>Status</span>
+        </div>
+        {reservations.length ? (
+          reservations.map((reservation) => (
+            <div className="staff-table-row" key={reservation.id}>
+              <span>
+                <b>{reservation.customer_name}</b>
+                <small>{reservation.customer_email}</small>
+              </span>
+              <span>
+                {reservation.reservation_date}
+                <small>
+                  {reservation.reservation_time} · {reservation.party_size} guests
+                </small>
+              </span>
+              <span>
+                {reservation.table_number}
+                <small>{reservation.location_description}</small>
+              </span>
+              <select
+                className="status"
+                value={reservation.status}
+                onChange={(event) => change(reservation.id, event.target.value)}
+                aria-label={`Status for reservation ${reservation.id}`}
+              >
+                {statuses.map((status) => (
+                  <option key={status}>{status}</option>
+                ))}
+              </select>
+              {reservation.add_ons?.length ? (
+                <small className="reservation-addons">
+                  Add-ons: {reservation.add_ons.map((item) => `${item.quantity} × ${item.name}`).join(', ')}
+                </small>
+              ) : null}
+            </div>
+          ))
+        ) : (
+          <p className="inline-state">No reservations found.</p>
+        )}
+      </div>
+    </StaffPanel>
+  );
 }
 
-function InventoryManagement({ items }) { return <StaffPanel title="Inventory & stock"><div className="inventory-grid"><Metric label="In stock" value={`${items.filter((item) => item.stockQuantity > 0).length}/${items.length}`} detail="Menu items available" /><Metric label="To reorder" value={items.filter((item) => item.stockQuantity < 5).length} detail="Review today" /></div>{items.map((item) => <div className="inventory-row" key={item.id}><span>{item.name}</span><div className="stock-bar"><i style={{ width: `${Math.min(100, item.stockQuantity * 5)}%` }} /></div><span>{item.stockQuantity} units</span></div>)}</StaffPanel> }
+function Metric({ label, value, detail }) {
+  return (
+    <article className="staff-metric">
+      <p className="eyebrow">{label}</p>
+      <strong>{value}</strong>
+      <span>{detail}</span>
+    </article>
+  );
+}
 
+function StaffPanel({ title, children }) {
+  return (
+    <section className="staff-panel">
+      <div className="staff-panel-header">
+        <p className="eyebrow">{title}</p>
+        <span className="plain-action" aria-hidden="true">
+          ···
+        </span>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function StaffOrderTable({ orders = [], navigate, detailed = false, onStatusChange, onError }) {
+  const statuses = ['Pending', 'Confirmed', 'Preparing', 'Ready', 'Completed', 'Cancelled'];
+  const changeStatus = (id, status) =>
+    updateOrderStatus(id, status)
+      .then(onStatusChange)
+      .catch((error) => onError(errorMessage(error, 'Order status could not be updated.')));
+
+  return (
+    <StaffPanel title={detailed ? 'All orders' : 'Live orders'}>
+      <div className="staff-table">
+        <div className="staff-table-row table-header">
+          <span>Order</span>
+          <span>Guest</span>
+          <span>Details</span>
+          <span>Status</span>
+        </div>
+        {orders.length ? (
+          orders.map((order) => (
+            <div className="staff-table-row" key={order.id} onClick={() => navigate('Orders')}>
+              <span>
+                <b>#{order.id}</b>
+                <small>${Number(order.total_amount || 0).toFixed(2)}</small>
+              </span>
+              <span>
+                {order.customer_name}
+                <small>{order.customer_email}</small>
+              </span>
+              <span>{order.items?.length || 0} items</span>
+              <select
+                className={`status status-${(order.status || '').toLowerCase()}`}
+                value={order.status}
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event) => changeStatus(order.id, event.target.value)}
+                aria-label={`Status for order ${order.id}`}
+              >
+                {statuses.map((status) => (
+                  <option key={status}>{status}</option>
+                ))}
+              </select>
+            </div>
+          ))
+        ) : (
+          <p className="inline-state">No orders found.</p>
+        )}
+      </div>
+    </StaffPanel>
+  );
+}
+
+function MenuManagement({ items = [], categories = [], onMenuChange, onError }) {
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('all');
+  const [editing, setEditing] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const filteredItems = items.filter(
+    (item) =>
+      (category === 'all' || String(item.category_id) === category) &&
+      `${item.name || ''} ${item.description || ''}`.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const save = async (form) => {
+    setBusy(true);
+    try {
+      if (editing?.id) {
+        await updateMenuItem(editing.id, form);
+      } else {
+        await createMenuItem(form);
+      }
+      await onMenuChange();
+      setEditing(null);
+    } catch (error) {
+      if (onError) onError(errorMessage(error, 'Menu item could not be saved.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await deleteMenuItem(deleting.id);
+      setDeleting(null);
+      await onMenuChange();
+    } catch (error) {
+      if (onError) onError(errorMessage(error, 'Menu item could not be deleted.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleAvailability = (item) =>
+    updateMenuItem(item.id, { is_available: !item.available })
+      .then(onMenuChange)
+      .catch((error) => onError(errorMessage(error, 'Availability could not be updated.')));
+
+  const updateStock = (item, value) => {
+    const stock = Number(value);
+    if (!Number.isInteger(stock) || stock < 0) {
+      onError('Stock quantity must be a whole number of zero or more.');
+      return;
+    }
+    updateMenuItem(item.id, { stock_quantity: stock, is_available: stock > 0 && item.available })
+      .then(onMenuChange)
+      .catch((error) => onError(errorMessage(error, 'Stock could not be updated.')));
+  };
+
+  return (
+    <>
+      <StaffPanel title="Menu management">
+        <div className="management-toolbar">
+          <div className="management-filters">
+            <input
+              className="staff-search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search menu..."
+              aria-label="Search menu"
+            />
+            <select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Filter by category">
+              <option value="all">All categories</option>
+              {categories.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button className="button button-dark" onClick={() => setEditing({})}>
+            Add menu item <span>+</span>
+          </button>
+        </div>
+        {filteredItems.length ? (
+          filteredItems.map((item) => (
+            <div className="management-row menu-management-row" key={item.id}>
+              <div className={`management-thumb ${item.tone || ''}`} />
+              <div>
+                <b>{item.name}</b>
+                <small>
+                  {item.category} · ${Number(item.price || 0).toFixed(2)}
+                </small>
+              </div>
+              <input
+                className="stock-input"
+                type="number"
+                min="0"
+                step="1"
+                value={item.stockQuantity ?? item.stock_quantity ?? 0}
+                onChange={(event) => updateStock(item, event.target.value)}
+                aria-label={`${item.name} stock`}
+              />
+              <button
+                className={`status ${item.available ? 'status-live' : 'status-sold'}`}
+                onClick={() => toggleAvailability(item)}
+              >
+                {item.available ? 'Live' : 'Unavailable'}
+              </button>
+              <button className="plain-action" onClick={() => setEditing(item)}>
+                Edit
+              </button>
+              <button className="plain-action danger" onClick={() => setDeleting(item)}>
+                Delete
+              </button>
+            </div>
+          ))
+        ) : (
+          <p className="inline-state">No menu items match your filters.</p>
+        )}
+      </StaffPanel>
+      {editing && <MenuItemModal item={editing.id ? editing : null} categories={categories} onClose={() => setEditing(null)} onSave={save} />}
+      {deleting && <ConfirmModal item={deleting} busy={busy} onClose={() => setDeleting(null)} onConfirm={remove} />}
+    </>
+  );
+}
+
+function InventoryManagement({ items = [] }) {
+  return (
+    <StaffPanel title="Inventory & stock">
+      <div className="inventory-grid">
+        <Metric
+          label="In stock"
+          value={`${items.filter((item) => (item.stockQuantity ?? item.stock_quantity ?? 0) > 0).length}/${items.length}`}
+          detail="Menu items available"
+        />
+        <Metric
+          label="To reorder"
+          value={items.filter((item) => (item.stockQuantity ?? item.stock_quantity ?? 0) < 5).length}
+          detail="Review today"
+        />
+      </div>
+      {items.map((item) => {
+        const qty = item.stockQuantity ?? item.stock_quantity ?? 0;
+        return (
+          <div className="inventory-row" key={item.id}>
+            <span>{item.name}</span>
+            <div className="stock-bar">
+              <i style={{ width: `${Math.min(100, qty * 5)}%` }} />
+            </div>
+            <span>{qty} units</span>
+          </div>
+        );
+      })}
+    </StaffPanel>
+  );
+}
 function Account({ user, reservations = [], orders = [], onClose, onLogout, onSave, onRefresh }) {
   const [activeTab, setActiveTab] = useState('profile')
   const [form, setForm] = useState({ 
