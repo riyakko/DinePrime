@@ -5,18 +5,35 @@ try {
     require_method('GET'); 
     $user = require_auth();
 
-    // 1. Fetch Orders
-    $sql = 'SELECT o.id, o.user_id, u.name AS customer_name, u.email AS customer_email, o.total_amount, o.status, o.notes, o.created_at, o.updated_at FROM orders o JOIN users u ON u.id = o.user_id'; 
+    // 1. Core query includes table_id and order_type explicitly
+    $sql = 'SELECT 
+                o.id, 
+                o.user_id, 
+                o.table_id,
+                o.order_type,
+                u.name AS customer_name, 
+                u.email AS customer_email, 
+                o.total_amount, 
+                o.status, 
+                o.notes, 
+                t.table_number,
+                t.location_description,
+                o.created_at, 
+                o.updated_at 
+            FROM orders o 
+            JOIN users u ON u.id = o.user_id
+            LEFT JOIN tables t ON t.id = o.table_id'; 
+            
     $params = [];
 
-    if ($user['role'] === 'customer') { 
+    if ($user['role'] === 'customer') {
         $sql .= ' WHERE o.user_id = ?'; 
         $params[] = $user['id']; 
     } elseif (!empty($_GET['status'])) { 
-        $statuses = array_values(array_filter(array_map('trim', explode(',', (string) $_GET['status'])))); 
-        if ($statuses) { 
-            $placeholders = implode(',', array_fill(0, count($statuses), '?')); 
-            $sql .= ' WHERE o.status IN (' . $placeholders . ')'; 
+        $statuses = array_values(array_filter(array_map('trim', explode(',', (string)$_GET['status'])))); 
+        if ($statuses) {
+            $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+            $sql .= ' WHERE o.status IN (' . $placeholders . ')';
             $params = array_merge($params, $statuses); 
         } 
     }
@@ -24,7 +41,11 @@ try {
     $sql .= ' ORDER BY o.created_at DESC'; 
     $statement = db()->prepare($sql); 
     $statement->execute($params); 
-    $orders = $statement->fetchAll();
+    $orders = $statement->fetchAll(PDO::FETCH_ASSOC);
+
+    if (empty($orders)) {
+        json_response(['orders' => []]);
+    }
 
     // Category preparation mapping (in minutes)
     $categoryPrepTimes = [
@@ -41,8 +62,11 @@ try {
         'sides'     => 60,
     ];
 
-    // 2. Fetch order items with Category Join
-    $itemsStmt = db()->prepare('
+    // 2. Optimized batch fetch for order items
+    $orderIds = array_column($orders, 'id');
+    $inClause = implode(',', array_fill(0, count($orderIds), '?'));
+
+    $itemsStmt = db()->prepare("
         SELECT 
             oi.order_id, 
             oi.menu_item_id, 
@@ -55,22 +79,27 @@ try {
         FROM order_items oi 
         JOIN menu_items m ON m.id = oi.menu_item_id 
         LEFT JOIN categories c ON c.id = m.category_id
-        WHERE oi.order_id = ?
-    ');
+        WHERE oi.order_id IN ($inClause)
+    ");
+    $itemsStmt->execute($orderIds);
+    $allItems = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // 3. Attach Items & Prep Times
-    foreach ($orders as &$order) { 
-        $itemsStmt->execute([$order['id']]); 
-        $orderItems = $itemsStmt->fetchAll();
+    // Group items by order_id
+    $itemsByOrder = [];
+    foreach ($allItems as $item) {
+        $categoryName = strtolower(trim((string)($item['category_name'] ?? '')));
+        $item['prep_time_minutes'] = $categoryPrepTimes[$categoryName] ?? 15;
+        $itemsByOrder[$item['order_id']][] = $item;
+    }
+
+    // 3. Map items and calculate estimated preparation times
+    foreach ($orders as &$order) {
+        $orderItems = $itemsByOrder[$order['id']] ?? [];
         $maxPrep = 5;
 
-        foreach ($orderItems as &$item) {
-            $categoryName = strtolower(trim((string)($item['category_name'] ?? '')));
-            $itemPrepTime = $categoryPrepTimes[$categoryName] ?? 15;
-
-            $item['prep_time_minutes'] = $itemPrepTime;
-            if ($itemPrepTime > $maxPrep) {
-                $maxPrep = $itemPrepTime;
+        foreach ($orderItems as $item) {
+            if ($item['prep_time_minutes'] > $maxPrep) {
+                $maxPrep = $item['prep_time_minutes'];
             }
         }
 

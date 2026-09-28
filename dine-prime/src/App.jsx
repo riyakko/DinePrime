@@ -6,6 +6,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import MenuItemModal, { ConfirmModal } from './components/staff/MenuItemModal'
 import KitchenDisplay from './components/staff/KitchenDisplay'
 import Analytics from './components/staff/Analytics'
+import EWalletQRModal from './EWalletQRModal';
 
 const customerNavItems = ['Home', 'Menu', 'Order', 'Reservations']
 const staffNavItems = ['Dashboard', 'Orders', 'Kitchen Display', 'Analytics', 'Reservation management', 'Menu management', 'Inventory']
@@ -328,84 +329,515 @@ function Home({ goTo }) {
 }
 
 function Feature({ image, index, title }) { return <article className="feature"><div className="feature-image"><img src={image} onError={handleImageError} alt={title} /></div><p className="eyebrow">{index}</p><h3>{title}</h3></article> }
+function Menu({ items = [], loading, error, filter, setFilter, search = '', setSearch, addToCart }) {
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [showBackToTop, setShowBackToTop] = useState(false);
 
-function Menu({ items, loading, error, filter, setFilter, search, setSearch, addToCart }) {
-  const [selectedItem, setSelectedItem] = useState(null)
-  const filters = ['All items', ...new Set(items.map((item) => item.category).filter(Boolean))]
-  const counts = filters.reduce((result, category) => ({ ...result, [category]: category === 'All items' ? items.length : items.filter((item) => item.category === category).length }), {})
-  const visibleItems = items.filter((item) => (filter === 'All items' || item.category === filter) && `${item.name} ${item.description}`.toLowerCase().includes(search.toLowerCase()))
-  
+  const filters = ['All items', ...new Set(items.map((item) => item.category).filter(Boolean))];
+  const counts = filters.reduce(
+    (result, category) => ({
+      ...result,
+      [category]: category === 'All items' ? items.length : items.filter((item) => item.category === category).length
+    }),
+    {}
+  );
+
+  const visibleItems = items.filter(
+    (item) =>
+      (filter === 'All items' || item.category === filter) &&
+      `${item.name || ''} ${item.description || ''}`.toLowerCase().includes((search || '').toLowerCase())
+  );
+
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search)
-    const tableParam = urlParams.get('table')
+    const urlParams = new URLSearchParams(window.location.search);
+    const tableParam = urlParams.get('table');
     if (tableParam) {
-      localStorage.setItem('dinePrimeTable', tableParam)
+      localStorage.setItem('dinePrimeTable', tableParam);
     }
-  }, [])
-  return <section className="menu-page content-width"><div className="section-heading"><p className="eyebrow">THE DINE PRIME MENU</p><h1>Eat <em>well.</em></h1><p className="muted">Seasonal plates, considered drinks, and a few<br />things we could not resist.</p></div><div className="menu-toolbar"><label className="menu-search" aria-label="Search the menu">⌕ <input aria-label="Search the menu" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search the menu" /></label><div>{filters.map((item) => <button key={item} className={filter === item ? 'selected' : ''} onClick={() => setFilter(item)}>{item}</button>)}</div></div><div className="menu-layout"><aside><p className="eyebrow">BROWSE</p>{filters.map((item) => <button key={item} className={filter === item ? 'side-selected' : ''} onClick={() => setFilter(item)}>{item}<span>{String(counts[item]).padStart(2, '0')}</span></button>)}<p className="aside-note"><b>INFORMATION</b><br />Categories help keep discovery<br />lightweight on mobile.</p></aside><div className="menu-grid">{loading ? <p className="inline-state">Loading the menu...</p> : error ? <p className="inline-error" role="alert">{error}</p> : visibleItems.length ? visibleItems.map((item) => <MenuCard key={item.id} item={item} addToCart={addToCart} onSelect={setSelectedItem} />) : <p className="inline-state">No dishes match your search.</p>}</div></div>{selectedItem && <ProductDetail item={selectedItem} addToCart={addToCart} onClose={() => setSelectedItem(null)} />}</section>
+  }, []);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowBackToTop(window.scrollY > 300);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleImageError = (e) => {
+    e.target.style.display = 'none';
+  };
+
+  return (
+    <section className="menu-page content-width">
+      <div className="section-heading">
+        <p className="eyebrow">THE DINE PRIME MENU</p>
+        <h1>Eat <em>well.</em></h1>
+        <p className="muted">
+          Seasonal plates, considered drinks, and a few<br />things we could not resist.
+        </p>
+      </div>
+
+      <div className="menu-toolbar">
+        <label className="menu-search" aria-label="Search the menu">
+          ⌕ <input aria-label="Search the menu" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search the menu" />
+        </label>
+        <div>
+          {filters.map((item) => (
+            <button key={item} className={filter === item ? 'selected' : ''} onClick={() => setFilter(item)}>
+              {item}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="menu-layout">
+        <aside>
+          <p className="eyebrow">BROWSE</p>
+          {filters.map((item) => (
+            <button key={item} className={filter === item ? 'side-selected' : ''} onClick={() => setFilter(item)}>
+              {item}<span>{String(counts[item] || 0).padStart(2, '0')}</span>
+            </button>
+          ))}
+          <p className="aside-note">
+            <b>INFORMATION</b><br />Categories help keep discovery<br />lightweight on mobile.
+          </p>
+        </aside>
+
+        <div className="menu-grid">
+          {loading ? (
+            <p className="inline-state">Loading the menu...</p>
+          ) : error ? (
+            <p className="inline-error" role="alert">{error}</p>
+          ) : visibleItems.length ? (
+            visibleItems.map((item) => (
+              <MenuCard 
+                key={item.id} 
+                item={item} 
+                addToCart={addToCart} 
+                onSelect={setSelectedItem} 
+                onError={handleImageError} 
+              />
+            ))
+          ) : (
+            <p className="inline-state">No dishes match your search.</p>
+          )}
+        </div>
+      </div>
+
+      {showBackToTop && (
+        <button className="back-to-top-button" onClick={scrollToTop} aria-label="Back to top">
+          ↑ Back to top
+        </button>
+      )}
+
+      {selectedItem && (
+        <ProductDetail 
+          item={selectedItem} 
+          addToCart={addToCart} 
+          onClose={() => setSelectedItem(null)} 
+          onError={handleImageError} 
+        />
+      )}
+    </section>
+  );
 }
 
-function MenuCard({ item, addToCart, onSelect }) { return <article className={`menu-card ${!item.available || item.stockQuantity < 1 ? 'unavailable' : ''}`}><button className={`dish-image ${item.tone}`} onClick={() => onSelect(item)}><img src={item.image} onError={handleImageError} alt={item.name} /><span>{item.available && item.stockQuantity > 0 ? 'VIEW DETAILS' : 'UNAVAILABLE'}</span></button><div className="card-meta"><div><p className="eyebrow">{item.category}</p><h3>{item.name}</h3><p>{item.description}</p>{item.allergen_tags && <small className="stock-label">Contains: {item.allergen_tags}</small>}<small className="stock-label">{item.available && item.stockQuantity > 0 ? `${item.stockQuantity} available` : 'Currently unavailable'}</small></div><span className="price">${item.price}</span></div>{item.available && item.stockQuantity > 0 && <button className="add-link" onClick={() => addToCart(item)}>Add to order <span>+</span></button>}</article> }
-function ProductDetail({ item, addToCart, onClose }) { const [instructions, setInstructions] = useState(''); return <div className="modal-backdrop"><section className="product-modal"><button className="modal-close" onClick={onClose} aria-label="Close">×</button><img src={item.image_url} onError={handleImageError} alt={item.name} /><p className="eyebrow">{item.category}</p><h2>{item.name}</h2><p className="muted">{item.description}</p>{item.allergen_tags && <p className="stock-label">Contains: {item.allergen_tags}</p>}<label className="special-request">Special instructions<textarea value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="Allergies, preferences, or a note for the kitchen..." /></label><div className="product-footer"><strong>${item.price}</strong><button className="button button-dark" disabled={!item.is_available || item.stock_quantity < 1} onClick={() => { addToCart({ ...item, available: item.is_available, stockQuantity: item.stock_quantity, special_instructions: instructions }); onClose() }}>{item.is_available && item.stock_quantity > 0 ? 'Add to order →' : 'Unavailable'}</button></div></section></div> }
+function MenuCard({ item, addToCart, onSelect, onError }) {
+  return (
+    <article className={`menu-card ${!item.available || item.stockQuantity < 1 ? 'unavailable' : ''}`}>
+      <button className={`dish-image ${item.tone || ''}`} onClick={() => onSelect(item)}>
+        <img src={item.image} onError={onError} alt={item.name} />
+        <span>{item.available && item.stockQuantity > 0 ? 'VIEW DETAILS' : 'UNAVAILABLE'}</span>
+      </button>
+      <div className="card-meta">
+        <div>
+          <p className="eyebrow">{item.category}</p>
+          <h3>{item.name}</h3>
+          <p>{item.description}</p>
+          {item.allergen_tags && <small className="stock-label">Contains: {item.allergen_tags}</small>}
+          <small className="stock-label">{item.available && item.stockQuantity > 0 ? `${item.stockQuantity} available` : 'Currently unavailable'}</small>
+        </div>
+        <span className="price">${item.price}</span>
+      </div>
+      {item.available && item.stockQuantity > 0 && (
+        <button className="add-link" onClick={() => addToCart(item)}>
+          Add to order <span>+</span>
+        </button>
+      )}
+    </article>
+  );
+}
 
-function Order({ cart, total, updateQuantity, updateInstructions, goTo, orderMessage, placeOrder, isSubmitting }) { 
-  const [diningOption, setDiningOption] = useState('takeout')
-  const [cartItems, setCartItems] = useState(cart)
-  const [errorMessage, setErrorMessage] = useState('')
-  const tableNumber = localStorage.getItem('dinePrimeTable')
-  
-  const isValidTableNumber = (table) => {
-    if (!table) return false
-    const numericValue = parseInt(table.replace(/\D/g, ''))
-    return !isNaN(numericValue) && numericValue > 0 && numericValue <= 99
-  }
-  
+function ProductDetail({ item, addToCart, onClose, onError }) {
+  const [instructions, setInstructions] = useState('');
+
+  const imageUrl = item.image || item.image_url;
+  const isAvailable = item.available ?? item.is_available;
+  const stockQty = item.stockQuantity ?? item.stock_quantity;
+
+  return (
+    <div className="modal-backdrop">
+      <section className="product-modal">
+        <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
+        <img src={imageUrl} onError={onError} alt={item.name} />
+        <p className="eyebrow">{item.category}</p>
+        <h2>{item.name}</h2>
+        <p className="muted">{item.description}</p>
+        {item.allergen_tags && <p className="stock-label">Contains: {item.allergen_tags}</p>}
+        <label className="special-request">
+          Special instructions
+          <textarea
+            value={instructions}
+            onChange={(event) => setInstructions(event.target.value)}
+            placeholder="Allergies, preferences, or a note for the kitchen..."
+          />
+        </label>
+        <div className="product-footer">
+          <strong>${item.price}</strong>
+          <button
+            className="button button-dark"
+            disabled={!isAvailable || stockQty < 1}
+            onClick={() => {
+              addToCart({
+                ...item,
+                available: isAvailable,
+                stockQuantity: stockQty,
+                special_instructions: instructions
+              });
+              onClose();
+            }}
+          >
+            {isAvailable && stockQty > 0 ? 'Add to order →' : 'Unavailable'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Order({
+  cart = [],
+  total,
+  updateQuantity,
+  updateInstructions,
+  goTo,
+  orderMessage,
+  placeOrder,
+  isSubmitting = false,
+  handleImageError
+}) {
+  const [diningOption, setDiningOption] = useState(
+    () => localStorage.getItem('dinePrimeDiningOption') || 'takeout'
+  );
+  const [errorMessage, setErrorMessage] = useState('');
+
+  // Table States
+  const [tables, setTables] = useState([]);
+  const [isLoadingTables, setIsLoadingTables] = useState(false);
+  const [tableError, setTableError] = useState(null);
+
+  const [selectedTable, setSelectedTable] = useState(
+    () => localStorage.getItem('dinePrimeTable') || ''
+  );
+  const [selectedTableId, setSelectedTableId] = useState(
+    () => localStorage.getItem('dinePrimeTableId') || null
+  );
+
+  // Calculated Pricing Values directly derived from props
+  const cartTotal =
+    typeof total === 'number'
+      ? total
+      : cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const tax = cartTotal * 0.1;
+  const finalTotal = cartTotal + tax;
+
+  // Safe table array extraction
+  const tableList = Array.isArray(tables)
+    ? tables
+    : tables?.tables || tables?.data || [];
+
+  // Fetch tables dynamically when dining option is dine-in
   useEffect(() => {
-    const syncCart = () => {
+    const fetchTables = async () => {
+      setIsLoadingTables(true);
+      setTableError(null);
       try {
-        const saved = localStorage.getItem('dineprime_cart')
-        const parsed = saved ? JSON.parse(saved) : []
-        setCartItems(Array.isArray(parsed) && parsed.length ? parsed : (cart.length ? cart : parsed))
-      } catch {
-        setCartItems(cart.length ? cart : [])
+        const response = await fetch('/api/tables/manage.php', {
+          credentials: 'include',
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+          setTables(data.tables || data.data || data || []);
+        } else {
+          setTableError(data.message || 'Failed to fetch tables');
+        }
+      } catch (err) {
+        console.error('Error fetching tables:', err);
+        setTableError('Network error while loading tables.');
+      } finally {
+        setIsLoadingTables(false);
+      }
+    };
+
+    if (diningOption === 'dine-in') {
+      fetchTables();
+    }
+  }, [diningOption]);
+
+  const availableTables = tableList.filter((t) => {
+    if (!t) return false;
+
+    if (t.status !== undefined && t.status !== null) {
+      const statusStr = String(t.status).trim().toLowerCase();
+      return statusStr === 'available';
+    }
+
+    if (t.is_available !== undefined) return Boolean(t.is_available);
+    if (t.isAvailable !== undefined) return Boolean(t.isAvailable);
+
+    return true;
+  });
+
+  // Payment Modal States
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' | 'card' | 'ewallet'
+  const [cardProvider, setCardProvider] = useState('visa');
+  const [cardDetails, setCardDetails] = useState({ name: '', number: '', expiry: '', cvv: '' });
+  const [ewalletProvider, setEwalletProvider] = useState('gcash');
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [showQRModal, setShowQRModal] = useState(false);
+
+  // Table Number Validator
+  const isValidTableNumber = (tableNum) => {
+    if (tableNum === null || tableNum === undefined || tableNum === '') return false;
+    const str = String(tableNum).trim();
+    if (str === '') return false;
+    const numericVal = Number(str.replace(/\D/g, ''));
+    return numericVal > 0 || str.length > 0;
+  };
+
+  const handleOptionChange = (option) => {
+    setDiningOption(option);
+    localStorage.setItem('dinePrimeDiningOption', option);
+    setErrorMessage('');
+
+    if (option === 'takeout') {
+      localStorage.removeItem('dinePrimeTable');
+      localStorage.removeItem('dinePrimeTableId');
+      setSelectedTable('');
+      setSelectedTableId(null);
+    }
+  };
+
+  const handleTableSelect = (tableValue) => {
+    const matchedTable = tableList.find(
+      (t) => String(t.id) === String(tableValue) || String(t.table_number) === String(tableValue)
+    );
+
+    if (matchedTable) {
+      const tableNum = matchedTable.table_number || matchedTable.id;
+      setSelectedTable(tableNum);
+      setSelectedTableId(matchedTable.id);
+      localStorage.setItem('dinePrimeTable', tableNum);
+      localStorage.setItem('dinePrimeTableId', matchedTable.id);
+    } else {
+      setSelectedTable(tableValue);
+      setSelectedTableId(tableValue || null);
+      if (tableValue) {
+        localStorage.setItem('dinePrimeTable', tableValue);
+        localStorage.setItem('dinePrimeTableId', tableValue);
+      } else {
+        localStorage.removeItem('dinePrimeTable');
+        localStorage.removeItem('dinePrimeTableId');
       }
     }
+    setErrorMessage('');
+  };
 
-    syncCart()
-    window.addEventListener('cartUpdated', syncCart)
-    window.addEventListener('storage', syncCart)
+  const handleInitiateOrder = () => {
+    if (diningOption === 'dine-in' && (!selectedTable || !selectedTableId)) {
+      setErrorMessage('Please select a valid table number for dine-in orders.');
+      return;
+    }
+    setErrorMessage('');
+    setShowPaymentModal(true);
+  };
 
-    return () => {
-      window.removeEventListener('cartUpdated', syncCart)
-      window.removeEventListener('storage', syncCart)
-    }
-  }, [])
+const formatOrderType = (type) => {
+  if (type === 'dine-in') return 'Dine-In';
+  if (type === 'takeout') return 'Takeout';
+  if (type === 'walk-in') return 'Walk-In';
+  if (type === 'reservation') return 'Reservation';
+  return 'Takeout';
+};
 
-  useEffect(() => {
-    setCartItems(cart)
-  }, [cart])
-  
-  useEffect(() => {
-    if (tableNumber) {
-      setDiningOption('dine-in')
+const executeOrderPlacement = async (paymentInfo) => {
+  const storedTableId = localStorage.getItem('dinePrimeTableId');
+  const storedTableNumber = localStorage.getItem('dinePrimeTable');
+  const storedOption = localStorage.getItem('dinePrimeDiningOption');
+
+  const effectiveOption = diningOption || storedOption || 'takeout';
+  const isDineIn = effectiveOption === 'dine-in';
+
+  // Resolve table_id from state or localStorage
+  const resolvedTableId = isDineIn
+    ? (selectedTableId || storedTableId || selectedTable || storedTableNumber || null)
+    : null;
+
+  // Format to match exact MySQL ENUM string: 'Dine-In' | 'Takeout'
+  const resolvedOrderType = formatOrderType(effectiveOption);
+
+  const finalPayload = {
+    order_type: resolvedOrderType,
+    table_id: resolvedTableId,
+    items: cart.map((item) => ({
+      menu_item_id: item.id,
+      quantity: item.quantity,
+      special_instructions: item.special_instructions || '',
+    })),
+    payment_method: paymentInfo.method || paymentMethod,
+    payment_details: paymentInfo.details,
+    amount: finalTotal
+  };
+
+  setIsProcessingPayment(true);
+  try {
+    const response = await fetch('/api/orders/create.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(finalPayload),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || data.message || 'Failed to submit order.');
     }
-  }, [tableNumber])
-  
-  useEffect(() => {
-    localStorage.setItem('dinePrimeDiningOption', diningOption)
-  }, [diningOption])
-  
-  useEffect(() => {
-    if (orderMessage) {
-      setErrorMessage(orderMessage)
+
+    localStorage.removeItem('dineprime_cart');
+    localStorage.removeItem('dinePrimeTable');
+    localStorage.removeItem('dinePrimeTableId');
+    setShowPaymentModal(false);
+    setShowQRModal(false);
+
+    if (typeof goTo === 'function') {
+      goTo('OrderConfirmation');
     }
-  }, [orderMessage])
-  
-  const cartTotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
-  const tax = cartTotal * 0.10
-  const finalTotal = cartTotal + tax
-  
-return (
+  } catch (err) {
+    console.error('Order submission error:', err);
+    setErrorMessage(err.message || 'Error processing order.');
+  } finally {
+    setIsProcessingPayment(false);
+  }
+};
+
+const handlePaymentSubmit = (e) => {
+  e.preventDefault();
+
+  const paymentInfo = {
+    method: paymentMethod,
+    details:
+      paymentMethod === 'card'
+        ? { provider: cardProvider, cardholder: cardDetails.name }
+        : paymentMethod === 'ewallet'
+        ? { provider: ewalletProvider }
+        : { note: 'Pay at Counter / Table' },
+  };
+
+  if (paymentMethod === 'ewallet') {
+    setShowPaymentModal(false);
+    setShowQRModal(true);
+    return;
+  }
+
+  setShowPaymentModal(false);
+  executeOrderPlacement(paymentInfo);
+};
+
+const handleQRPaymentSuccess = () => {
+  setShowQRModal(false);
+
+  const paymentInfo = {
+    method: 'ewallet',
+    details: { provider: ewalletProvider },
+  };
+
+  executeOrderPlacement(paymentInfo);
+};
+
+  const renderTableSelectDropdown = (id = 'table-select') => (
+    <div className="table-select-container" style={{ margin: '12px 0' }}>
+      <label htmlFor={id} style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem' }}>
+        Select Table Number:
+      </label>
+      <select
+        id={id}
+        value={selectedTableId || selectedTable || ''}
+        onChange={(e) => handleTableSelect(e.target.value)}
+        disabled={isLoadingTables}
+        style={{
+          width: '100%',
+          padding: '10px',
+          borderRadius: '4px',
+          border: '1px solid #ccc'
+        }}
+      >
+        <option value="">
+          {isLoadingTables
+            ? '-- Loading Available Tables... --'
+            : availableTables.length === 0
+            ? '-- No Available Tables Found --'
+            : '-- Choose an Available Table --'}
+        </option>
+        {availableTables.map((t) => (
+          <option key={t.id || t.table_number} value={t.id || t.table_number}>
+            Table {String(t.table_number || t.id).replace(/^Table\s+/i, '')} {t.capacity ? `(${t.capacity} seats)` : ''}
+          </option>
+        ))}
+      </select>
+      {tableError && <p style={{ color: 'red', fontSize: '0.8rem', marginTop: '4px' }}>{tableError}</p>}
+    </div>
+  );
+
+  const modalOverlayStyle = {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000
+  };
+
+  const modalContentStyle = {
+    backgroundColor: '#fff',
+    padding: '24px',
+    borderRadius: '8px',
+    maxWidth: '420px',
+    width: '90%',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
+  };
+
+  const inputStyle = {
+    width: '100%',
+    padding: '10px',
+    borderRadius: '4px',
+    border: '1px solid #ccc',
+    boxSizing: 'border-box'
+  };
+
+  return (
     <section className="order-page content-width">
       <div className="section-heading">
         <p className="eyebrow">YOUR ORDER · STEP 02 OF 03</p>
@@ -415,101 +847,62 @@ return (
 
       <div className="order-layout">
         <div className="order-items">
-          {cartItems.length === 0 ? (
-            <>
-              <label className="dining-option">
-                Dining preference
-                <div className="segmented">
-                  {['dine-in', 'takeout'].map((option) => (
-                    <button
-                      key={option}
-                      className={diningOption === option ? 'chosen' : ''}
-                      onClick={() => {
-                        setDiningOption(option);
-                        if (option === 'takeout') localStorage.removeItem('dinePrimeTable');
-                      }}
-                    >
-                      {option === 'dine-in' ? 'Dine-In' : 'Takeout'}
-                      {option === 'dine-in' && isValidTableNumber(tableNumber) && (
-                        <small>Table {tableNumber}</small>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </label>
+          <label className="dining-option">
+            Dining preference
+            <div className="segmented">
+              {['dine-in', 'takeout'].map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  className={diningOption === option ? 'chosen' : ''}
+                  onClick={() => handleOptionChange(option)}
+                >
+                  {option === 'dine-in' ? 'Dine-In' : 'Takeout'}
+                  {option === 'dine-in' && isValidTableNumber(selectedTable) && (
+                    <small>Table {selectedTable}</small>
+                  )}
+                </button>
+              ))}
+            </div>
+          </label>
 
-              <div className="empty-state">
-                <p className="eyebrow">
-                  {diningOption === 'dine-in' ? 'YOUR TABLE AWAITS' : 'READY FOR PICKUP'}
-                </p>
-                <h2>
-                  {diningOption === 'dine-in' ? (
-                    isValidTableNumber(tableNumber) ? (
-                      <>Table {tableNumber} <em>reserved.</em></>
-                    ) : (
-                      <>Nothing here <em>yet.</em></>
-                    )
+          {diningOption === 'dine-in' && renderTableSelectDropdown()}
+          {errorMessage && <p className="error-message" style={{ color: 'red' }}>{errorMessage}</p>}
+
+          {cart.length === 0 ? (
+            <div className="empty-state">
+              <p className="eyebrow">
+                {diningOption === 'dine-in' ? 'YOUR TABLE AWAITS' : 'READY FOR PICKUP'}
+              </p>
+              <h2>
+                {diningOption === 'dine-in' ? (
+                  isValidTableNumber(selectedTable) ? (
+                    <>Table {selectedTable} <em>reserved.</em></>
                   ) : (
                     <>Nothing here <em>yet.</em></>
-                  )}
-                </h2>
-
-                {errorMessage && <p className="error-message">{errorMessage}</p>}
-
-                <p>
-                  {diningOption === 'dine-in'
-                    ? 'Start with something from the menu.'
-                    : 'Browse our menu for pickup.'}
-                </p>
-                <button className="button button-dark" onClick={() => goTo('Menu')}>
-                  Browse menu <span>→</span>
-                </button>
-              </div>
-            </>
+                  )
+                ) : (
+                  <>Nothing here <em>yet.</em></>
+                )}
+              </h2>
+              <p>
+                {diningOption === 'dine-in'
+                  ? 'Start with something from the menu.'
+                  : 'Browse our menu for pickup.'}
+              </p>
+              <button className="button button-dark" onClick={() => goTo && goTo('Menu')}>
+                Browse menu <span>→</span>
+              </button>
+            </div>
           ) : (
             <>
-              <label className="dining-option">
-                Dining preference
-                <div className="segmented">
-                  {['dine-in', 'takeout'].map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      className={diningOption === option ? 'chosen' : ''}
-                      onClick={() => {
-                        setDiningOption(option);
-                        
-                        // 1. Always persist the selected option to localStorage
-                        localStorage.setItem('dinePrimeDiningOption', option);
-
-                        // 2. Clear error message on tab switch
-                        if (typeof setErrorMessage === 'function') setErrorMessage('');
-                        if (typeof setOrderMessage === 'function') setOrderMessage('');
-
-                        // 3. Clear table preference if takeout is selected
-                        if (option === 'takeout') {
-                          localStorage.removeItem('dinePrimeTable');
-                        }
-                      }}
-                    >
-                      {option === 'dine-in' ? 'Dine-In' : 'Takeout'}
-                      {option === 'dine-in' && isValidTableNumber(tableNumber) && (
-                        <small>Table {tableNumber}</small>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </label>
-
-              {errorMessage && <p className="error-message">{errorMessage}</p>}
-
-              {cartItems.map((item) => (
+              {cart.map((item) => (
                 <article className="order-item" key={item.id}>
                   <img
                     className="order-thumb"
                     src={item.image_url}
                     onError={handleImageError}
-                    alt=""
+                    alt={item.name || 'Menu item'}
                   />
                   <div>
                     <p className="eyebrow">{item.category}</p>
@@ -518,16 +911,16 @@ return (
                     <textarea
                       className="item-instructions"
                       value={item.special_instructions || ''}
-                      onChange={(event) => updateInstructions(item.id, event.target.value)}
+                      onChange={(e) => updateInstructions && updateInstructions(item.id, e.target.value)}
                       placeholder="Special instructions for this item..."
                     />
                   </div>
                   <div className="quantity">
-                    <button onClick={() => updateQuantity(item.id, -1)}>−</button>
+                    <button onClick={() => updateQuantity && updateQuantity(item.id, -1)}>−</button>
                     <span>{item.quantity}</span>
                     <button
-                      disabled={item.quantity >= item.stockQuantity}
-                      onClick={() => updateQuantity(item.id, 1)}
+                      disabled={item.stockQuantity !== undefined && item.quantity >= item.stockQuantity}
+                      onClick={() => updateQuantity && updateQuantity(item.id, 1)}
                     >
                       +
                     </button>
@@ -538,8 +931,8 @@ return (
 
               <button
                 className="button button-dark"
-                onClick={placeOrder}
-                disabled={cartItems.length === 0 || isSubmitting}
+                onClick={handleInitiateOrder}
+                disabled={cart.length === 0 || isSubmitting}
               >
                 {isSubmitting ? 'Processing...' : 'Place order'} <span>→</span>
               </button>
@@ -549,9 +942,9 @@ return (
 
         <aside className="summary">
           <p className="eyebrow">
-            YOUR ORDER <span>{cartItems.reduce((sum, item) => sum + item.quantity, 0)} items</span>
+            YOUR ORDER <span>{cart.reduce((sum, item) => sum + item.quantity, 0)} items</span>
           </p>
-          {cartItems.map((item) => (
+          {cart.map((item) => (
             <div className="summary-row" key={item.id}>
               <span>{item.quantity} × {item.name}</span>
               <b>${(item.price * item.quantity).toFixed(2)}</b>
@@ -572,10 +965,159 @@ return (
           </div>
         </aside>
       </div>
+
+      {/* Payment Gateway Modal */}
+      {showPaymentModal && (
+        <div style={modalOverlayStyle}>
+          <div style={modalContentStyle}>
+            <h3 style={{ marginTop: 0 }}>Select Payment Method</h3>
+            <p>Total Amount: <strong>${finalTotal.toFixed(2)}</strong></p>
+
+            <div style={{ display: 'flex', gap: '8px', margin: '16px 0' }}>
+              {['cash', 'card', 'ewallet'].map((method) => (
+                <button
+                  key={method}
+                  type="button"
+                  style={{
+                    flex: 1,
+                    padding: '8px 4px',
+                    border: paymentMethod === method ? '2px solid #000' : '1px solid #ccc',
+                    background: paymentMethod === method ? '#1a1a1a' : '#fff',
+                    color: paymentMethod === method ? '#fff' : '#000',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: 600
+                  }}
+                  onClick={() => setPaymentMethod(method)}
+                >
+                  {method === 'cash' ? '💵 Cash' : method === 'card' ? '💳 Card' : '📱 E-Wallet'}
+                </button>
+              ))}
+            </div>
+
+            <form onSubmit={handlePaymentSubmit}>
+              {paymentMethod === 'cash' && (
+                <p style={{ fontSize: '13px', color: '#666', margin: '16px 0' }}>
+                  Pay directly at the cashier counter or to your server at the table.
+                </p>
+              )}
+
+              {paymentMethod === 'card' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <select
+                    value={cardProvider}
+                    onChange={(e) => setCardProvider(e.target.value)}
+                    style={inputStyle}
+                  >
+                    <option value="visa">Visa</option>
+                    <option value="mastercard">Mastercard</option>
+                    <option value="debit">Debit Card</option>
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Cardholder Name"
+                    required
+                    value={cardDetails.name}
+                    onChange={(e) => setCardDetails({ ...cardDetails, name: e.target.value })}
+                    style={inputStyle}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Card Number (16 digits)"
+                    maxLength={16}
+                    required
+                    value={cardDetails.number}
+                    onChange={(e) => setCardDetails({ ...cardDetails, number: e.target.value })}
+                    style={inputStyle}
+                  />
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      type="text"
+                      placeholder="MM/YY"
+                      maxLength={5}
+                      required
+                      value={cardDetails.expiry}
+                      onChange={(e) => setCardDetails({ ...cardDetails, expiry: e.target.value })}
+                      style={inputStyle}
+                    />
+                    <input
+                      type="password"
+                      placeholder="CVV"
+                      maxLength={3}
+                      required
+                      value={cardDetails.cvv}
+                      onChange={(e) => setCardDetails({ ...cardDetails, cvv: e.target.value })}
+                      style={inputStyle}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {paymentMethod === 'ewallet' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <select
+                    value={ewalletProvider}
+                    onChange={(e) => setEwalletProvider(e.target.value)}
+                    style={inputStyle}
+                  >
+                    <option value="gcash">GCash</option>
+                    <option value="paypal">PayPal</option>
+                    <option value="gotyme">GoTyme Bank</option>
+                  </select>
+
+                  <div style={{
+                    padding: '12px',
+                    backgroundColor: '#f8f9fa',
+                    borderRadius: '6px',
+                    border: '1px solid #e9ecef',
+                    textAlign: 'center',
+                    fontSize: '0.85rem',
+                    color: '#555',
+                    lineHeight: '1.4'
+                  }}>
+                    📱 A payment QR code will be generated upon confirmation for you to scan and pay.
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => setShowPaymentModal(false)}
+                  disabled={isProcessingPayment}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="button button-dark" disabled={isProcessingPayment}>
+                  {isProcessingPayment ? 'Processing...' : 'Confirm & Pay'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* External EWalletQRModal */}
+      {showQRModal && typeof EWalletQRModal !== 'undefined' && (
+        <EWalletQRModal
+          paymentData={{
+            order_id: 'TEMP-' + Date.now().toString().slice(-4),
+            amount: finalTotal,
+            provider: ewalletProvider.toUpperCase(),
+            qr_code_url: `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=DinePrime-${ewalletProvider.toUpperCase()}-${finalTotal.toFixed(2)}`
+          }}
+          onClose={() => {
+            setShowQRModal(false);
+            setShowPaymentModal(true);
+          }}
+          onPaymentSuccess={handleQRPaymentSuccess}
+        />
+      )}
     </section>
   );
 }
-
 function LiveReservations({ user, menuItems, goTo, onError }) {
   const [tables, setTables] = useState([])
   const [selectedTable, setSelectedTable] = useState(null)
@@ -662,10 +1204,26 @@ function InventoryManagement({ items }) { return <StaffPanel title="Inventory & 
 
 function Account({ user, reservations = [], orders = [], onClose, onLogout, onSave, onRefresh }) {
   const [activeTab, setActiveTab] = useState('profile')
-  const [form, setForm] = useState({ name: user?.name || '', phone: user?.phone || '', address: user?.address || '' })
+  const [form, setForm] = useState({ 
+    name: user?.name || user?.full_name || '', 
+    phone: user?.phone || user?.phone_number || '', 
+    address: user?.address || '' 
+  })
   const [preferences, setPreferences] = useState({ vegetarian: false, outdoor: false })
   const [saving, setSaving] = useState(false)
 
+  // 1. Synchronize form state whenever user prop updates or loads on refresh
+  useEffect(() => {
+    if (user) {
+      setForm({
+        name: user.name || user.full_name || '',
+        phone: user.phone || user.phone_number || '',
+        address: user.address || ''
+      })
+    }
+  }, [user])
+
+  // 2. Poll refresh interval
   useEffect(() => {
     if (typeof onRefresh === 'function') {
       onRefresh()
@@ -676,7 +1234,7 @@ function Account({ user, reservations = [], orders = [], onClose, onLogout, onSa
     }
   }, [onRefresh])
 
-  const nameParts = (form.name || 'Guest Member').trim().split(/\s+/)
+  const nameParts = (form.name || user?.name || user?.full_name || 'Guest').trim().split(/\s+/)
   const save = async () => { setSaving(true); try { await onSave?.(form) } finally { setSaving(false) } }
 
   const tabs = [
@@ -717,6 +1275,7 @@ function Account({ user, reservations = [], orders = [], onClose, onLogout, onSa
               </div>
             </>
           )}
+
           {activeTab === 'reservations' && (
             <>
               <p className="eyebrow">YOUR RESERVATIONS</p>
@@ -741,34 +1300,70 @@ function Account({ user, reservations = [], orders = [], onClose, onLogout, onSa
               )}
             </>
           )}
+
           {activeTab === 'orders' && (
             <>
               <p className="eyebrow">ORDER HISTORY</p>
               <h2>Past evenings.</h2>
               {orders?.length ? (
                 <div className="account-reservations">
-                  {orders.map((order) => (
-                    <article className="account-reservation" key={order.id}>
-                      <div>
-                        <b>Order #{order.id}</b>
-                        <span>{new Date(order.created_at).toLocaleDateString()} · ${Number(order.total_amount).toFixed(2)}</span>
-                        {order.items?.map((item) => (
-                          <small key={item.menu_item_id || item.id}>
-                            {item.quantity} × {item.name}{item.special_instructions ? ` · Note: ${item.special_instructions}` : ''}
-                          </small>
-                        ))}
-                      </div>
-                      <strong className={`reservation-status status-${(order.status || 'pending').toLowerCase()}`}>
-                        {order.status}
-                      </strong>
-                    </article>
-                  ))}
+                  {orders.map((order) => {
+                    const rawType = String(order.order_type || '').trim();
+                    const typeLower = rawType.toLowerCase();
+                    
+                    const tableDesignation = order.table_number || (order.table_id ? `Table ${order.table_id}` : null);
+                    const locationInfo = order.location_description ? ` (${order.location_description})` : '';
+
+                    let diningText = 'Takeout';
+
+                    if (tableDesignation) {
+                      diningText = `Dine-In · ${tableDesignation}${locationInfo}`;
+                    } else if (typeLower.includes('dine')) {
+                      diningText = 'Dine-In';
+                    } else if (typeLower.includes('walk')) {
+                      diningText = 'Walk-In';
+                    } else if (typeLower.includes('res')) {
+                      diningText = 'Reservation';
+                    } else {
+                      diningText = 'Takeout';
+                    }
+
+                    return (
+                      <article className="account-reservation" key={order.id}>
+                        <div>
+                          <b>Order #{order.id}</b>
+                          <span>
+                            {new Date(order.created_at).toLocaleString('en-US', {
+                              month: 'numeric',
+                              day: 'numeric',
+                              year: 'numeric',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                              hour12: true,
+                            })}
+                            {' · '}
+                            {diningText}
+                            {' · '}${Number(order.total_amount).toFixed(2)}
+                          </span>
+                          {order.items?.map((item) => (
+                            <small key={item.menu_item_id || item.id}>
+                              {item.quantity} × {item.name}{item.special_instructions ? ` · Note: ${item.special_instructions}` : ''}
+                            </small>
+                          ))}
+                        </div>
+                        <strong className={`reservation-status status-${(order.status || 'pending').toLowerCase()}`}>
+                          {order.status}
+                        </strong>
+                      </article>
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="muted">You do not have any orders yet.</p>
               )}
             </>
           )}
+
           {activeTab === 'preferences' && (
             <>
               <p className="eyebrow">DINING PREFERENCES</p>

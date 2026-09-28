@@ -17,11 +17,20 @@ try {
     $validated = [];
 
     // 1. Check duplicate recent pending order
-    $duplicateCheck = $pdo->prepare("SELECT id FROM orders WHERE user_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL 2 MINUTE) AND status = 'Pending' LIMIT 1 FOR UPDATE");
+    $duplicateCheck = $pdo->prepare("
+        SELECT id FROM orders 
+        WHERE user_id = ? 
+          AND created_at > DATE_SUB(NOW(), INTERVAL 2 MINUTE) 
+          AND status = 'Pending' 
+        LIMIT 1 FOR UPDATE
+    ");
     $duplicateCheck->execute([$user['id']]);
     if ($duplicateCheck->fetch()) {
         $pdo->rollBack();
-        json_response(['error' => 'You have a recent pending order. Please wait before placing another order.'], 409);
+        json_response([
+            'status' => 'error',
+            'message' => 'You have a recent pending order. Please wait 2 minutes before placing another.'
+        ], 409);
     }
 
     // 2. Validate menu items and stock
@@ -36,10 +45,10 @@ try {
         }
 
         $lock->execute([$id]);
-        $item = $lock->fetch();
+        $item = $lock->fetch(PDO::FETCH_ASSOC);
 
         if (!$item || !(bool) $item['is_available'] || (int) $item['stock_quantity'] < $quantity) {
-            throw new RuntimeException('One or more selected items are unavailable or out of stock.');
+            throw new RuntimeException("Item ID {$id} is unavailable or out of stock.");
         }
 
         $subtotal = (float) $item['price'] * $quantity;
@@ -52,50 +61,68 @@ try {
         ];
     }
 
-    // Normalize order type
-    $orderType = (string) ($input['order_type'] ?? 'Takeout');
-    $tableId = isset($input['table_id']) && $input['table_id'] !== null ? (int) $input['table_id'] : null;
-
-    // Check table and order_type columns presence dynamically
-    $hasTableColumns = false;
-    $hasOrderTypeColumn = false;
-    try {
-        $hasTableColumns = $pdo->query("SHOW COLUMNS FROM orders LIKE 'table_id'")->fetch() !== false;
-        $hasOrderTypeColumn = $pdo->query("SHOW COLUMNS FROM orders LIKE 'order_type'")->fetch() !== false;
-    } catch (Throwable $e) {
-        $hasTableColumns = false;
-        $hasOrderTypeColumn = false;
+    // Normalize order type matching exact MySQL ENUM casing
+    $rawOrderType = strtolower(trim((string) ($input['order_type'] ?? 'takeout')));
+    if (str_contains($rawOrderType, 'dine')) {
+        $orderType = 'Dine-In';
+    } elseif (str_contains($rawOrderType, 'walk')) {
+        $orderType = 'Walk-In';
+    } elseif (str_contains($rawOrderType, 'res')) {
+        $orderType = 'Reservation';
+    } else {
+        $orderType = 'Takeout';
     }
 
-    // 3. Table verification logic ONLY for table-based orders
-    if ($hasTableColumns && in_array($orderType, ['Reservation', 'Walk-In', 'Dine-In'], true)) {
-        if ($orderType === 'Walk-In' && $tableId === null) {
-            $tableStmt = $pdo->prepare("SELECT t.id FROM tables t LEFT JOIN orders o ON o.table_id = t.id AND o.status IN ('Pending', 'Confirmed', 'Preparing', 'Ready') WHERE t.is_active = 1 AND o.id IS NULL ORDER BY t.id ASC LIMIT 1 FOR UPDATE");
-            $tableStmt->execute();
-            $table = $tableStmt->fetch();
-            if (!$table) throw new RuntimeException('No available tables for walk-in order.');
-            $tableId = (int) $table['id'];
-        } elseif ($tableId !== null) {
-            $tableCheck = $pdo->prepare("SELECT t.id FROM tables t LEFT JOIN orders o ON o.table_id = t.id AND o.status IN ('Pending', 'Confirmed', 'Preparing', 'Ready') WHERE t.id = ? AND t.is_active = 1 AND o.id IS NULL FOR UPDATE");
-            $tableCheck->execute([$tableId]);
-            if (!$tableCheck->fetch()) throw new RuntimeException('The selected table is unavailable or already occupied.');
-        }
-    } else {
-        // Clear tableId if order is Takeout
+    // Sanitize Table ID
+    $tableId = isset($input['table_id']) && $input['table_id'] !== '' && $input['table_id'] !== null
+        ? (int) $input['table_id'] 
+        : null;
+
+    // Force Takeout to have null table_id
+    if ($orderType === 'Takeout') {
         $tableId = null;
     }
 
-    // 4. Insert order record based on available columns
-    if ($hasTableColumns && $hasOrderTypeColumn) {
-        $order = $pdo->prepare("INSERT INTO orders (user_id, table_id, order_type, total_amount, status, notes) VALUES (?, ?, ?, ?, 'Pending', ?)");
-        $order->execute([$user['id'], $tableId, $orderType, $total, trim((string) ($input['notes'] ?? ''))]);
-    } elseif ($hasTableColumns) {
-        $order = $pdo->prepare("INSERT INTO orders (user_id, table_id, total_amount, status, notes) VALUES (?, ?, ?, 'Pending', ?)");
-        $order->execute([$user['id'], $tableId, $total, trim((string) ($input['notes'] ?? ''))]);
-    } else {
-        $order = $pdo->prepare("INSERT INTO orders (user_id, total_amount, status, notes) VALUES (?, ?, 'Pending', ?)");
-        $order->execute([$user['id'], $total, trim((string) ($input['notes'] ?? ''))]);
+    // Validate table selection requirement for Dine-In
+    if ($orderType === 'Dine-In' && $tableId === null) {
+        throw new InvalidArgumentException('Please select a valid table for Dine-In orders.');
     }
+
+    // 3. Table verification logic
+    if ($tableId !== null) {
+        $tableCheck = $pdo->prepare("SELECT id FROM tables WHERE id = ? AND is_active = 1 FOR UPDATE");
+        $tableCheck->execute([$tableId]);
+        if (!$tableCheck->fetch()) {
+            throw new RuntimeException('The selected table is unavailable or invalid.');
+        }
+    } elseif ($orderType === 'Walk-In') {
+        $tableStmt = $pdo->prepare("
+            SELECT t.id 
+            FROM tables t 
+            LEFT JOIN orders o ON o.table_id = t.id AND o.status IN ('Pending', 'Confirmed', 'Preparing', 'Ready') 
+            WHERE t.is_active = 1 AND o.id IS NULL 
+            ORDER BY t.id ASC LIMIT 1 FOR UPDATE
+        ");
+        $tableStmt->execute();
+        $table = $tableStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$table) {
+            throw new RuntimeException('No available tables for walk-in order.');
+        }
+        $tableId = (int) $table['id'];
+    }
+
+    // 4. Insert order record explicitly setting table_id and order_type
+    $order = $pdo->prepare("
+        INSERT INTO orders (user_id, table_id, order_type, total_amount, status, notes, created_at, updated_at) 
+        VALUES (?, ?, ?, ?, 'Pending', ?, NOW(), NOW())
+    ");
+    $order->execute([
+        $user['id'], 
+        $tableId, 
+        $orderType, 
+        $total, 
+        trim((string) ($input['notes'] ?? ''))
+    ]);
 
     $orderId = (int) $pdo->lastInsertId();
 
@@ -112,20 +139,51 @@ try {
 
     $pdo->commit();
 
-    $responseData = ['order' => ['id' => $orderId, 'total_amount' => $total, 'status' => 'Pending']];
-    if ($hasTableColumns) {
-        $responseData['order']['table_id'] = $tableId;
-    }
-    if ($hasOrderTypeColumn) {
-        $responseData['order']['order_type'] = $orderType;
-    }
+    // Read incoming raw order type supporting multiple potential key aliases
+$rawOrderType = strtolower(trim((string) (
+    $input['order_type'] 
+    ?? $input['dining_option'] 
+    ?? $input['diningOption'] 
+    ?? $input['type'] 
+    ?? 'dine-in'
+)));
 
-    json_response($responseData, 201);
+if (str_contains($rawOrderType, 'dine')) {
+    $orderType = 'Dine-In';
+} elseif (str_contains($rawOrderType, 'walk')) {
+    $orderType = 'Walk-In';
+} elseif (str_contains($rawOrderType, 'res')) {
+    $orderType = 'Reservation';
+} else {
+    $orderType = 'Takeout';
+}
 
-} catch (InvalidArgumentException|RuntimeException $error) {
+// Read incoming table ID supporting multiple potential key aliases
+$rawTableId = $input['table_id'] ?? $input['tableId'] ?? $input['table_number'] ?? null;
+
+$tableId = ($rawTableId !== '' && $rawTableId !== null) 
+    ? (int) $rawTableId 
+    : null;
+
+    json_response([
+        'order' => [
+            'id' => $orderId,
+            'table_id' => $tableId,
+            'order_type' => $orderType,
+            'total_amount' => $total,
+            'status' => 'Pending'
+        ]
+    ], 201);
+
+} catch (InvalidArgumentException | RuntimeException $error) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
     json_response(['status' => 'error', 'message' => $error->getMessage()], 409);
 } catch (Throwable $error) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
-    json_response(['status' => 'error', 'message' => $error->getMessage()], 500);
+    json_response([
+        'status' => 'error',
+        'message' => $error->getMessage(),
+        'file' => $error->getFile(),
+        'line' => $error->getLine()
+    ], 500);
 }

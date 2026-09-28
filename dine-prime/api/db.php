@@ -1,16 +1,29 @@
 <?php
 declare(strict_types=1);
 
+// 1. Dynamic Origin Matching for Production & Local Environments
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-$allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+$allowedOrigins = [
+    'https://dineprime.xo.je',
+    'http://dineprime.xo.je',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+];
+
 if (in_array($origin, $allowedOrigins, true)) {
     header('Access-Control-Allow-Origin: ' . $origin);
     header('Access-Control-Allow-Credentials: true');
+} elseif (!empty($origin)) {
+    // Dynamic fallback for matching subdomains
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Access-Control-Allow-Credentials: true');
 }
-header('Access-Control-Allow-Headers: Content-Type, X-Requested-With');
+
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Content-Type: application/json; charset=utf-8');
 
+// 2. Immediate Options Exit with Full CORS Headers Attached
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
@@ -21,24 +34,36 @@ const DB_NAME = 'if0_43006599_dineprime';
 const DB_USER = 'if0_43006599';
 const DB_PASS = 'NsUHO1M6g9i';
 
-session_set_cookie_params([
-    'lifetime' => 60 * 60 * 24 * 7,
-    'path' => '/',
-    'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
-    'httponly' => true,
-    'samesite' => 'Lax',
-]);
-session_start();
+// 3. Configure Sessions
+if (session_status() === PHP_SESSION_NONE) {
+    session_set_cookie_params([
+        'lifetime' => 60 * 60 * 24 * 7,
+        'path' => '/',
+        'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    session_start();
+}
 
 function db(): PDO {
     static $connection;
     if (!$connection) {
-        $connection = new PDO(
-            'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4',
-            DB_USER,
-            DB_PASS,
-            [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false]
-        );
+        try {
+            $connection = new PDO(
+                'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4',
+                DB_USER,
+                DB_PASS,
+                [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                    PDO::ATTR_EMULATE_PREPARES => false
+                ]
+            );
+        } catch (PDOException $e) {
+            // Output explicit JSON error instead of letting server trigger a 302/404 redirect
+            json_response(['error' => 'Database connection failed: ' . $e->getMessage()], 500);
+        }
     }
     return $connection;
 }
@@ -56,27 +81,42 @@ function body(): array {
 }
 
 function public_user(array $user): array {
-    return ['id' => (int) $user['id'], 'name' => $user['name'], 'email' => $user['email'], 'role' => $user['role'], 'phone' => $user['phone'] ?? null, 'address' => $user['address'] ?? null];
+    return [
+        'id' => (int) $user['id'],
+        'name' => $user['name'],
+        'email' => $user['email'],
+        'role' => $user['role'],
+        'phone' => $user['phone'] ?? null,
+        'address' => $user['address'] ?? null
+    ];
 }
 
 function require_auth(array $roles = []): array {
     $user = $_SESSION['user'] ?? null;
-    if (!$user) json_response(['error' => 'Authentication required.'], 401);
-    if ($roles && !in_array($user['role'], $roles, true)) json_response(['error' => 'You do not have permission to access this resource.'], 403);
+    if (!$user) {
+        json_response(['error' => 'Authentication required.'], 401);
+    }
+    if ($roles && !in_array($user['role'], $roles, true)) {
+        json_response(['error' => 'You do not have permission to access this resource.'], 403);
+    }
     return $user;
 }
 
 function require_method(string $method): void {
-    if ($_SERVER['REQUEST_METHOD'] !== $method) json_response(['error' => 'Method not allowed.'], 405);
+    if ($_SERVER['REQUEST_METHOD'] !== $method) {
+        json_response(['error' => 'Method not allowed.'], 405);
+    }
 }
 
 function validate_id(): int {
     $id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT) ?: filter_input(INPUT_POST, 'id', FILTER_VALIDATE_INT);
-    if (!$id) json_response(['error' => 'A valid id is required.'], 422);
+    if (!$id) {
+        json_response(['error' => 'A valid id is required.'], 422);
+    }
     return $id;
 }
 
 function handle_api_error(Throwable $error): never {
     error_log($error->getMessage());
-    json_response(['error' => 'The server could not complete that request.'], 500);
+    json_response(['error' => $error->getMessage()], 500);
 }
