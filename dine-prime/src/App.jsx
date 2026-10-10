@@ -77,6 +77,7 @@ function App() {
   const [authBusy, setAuthBusy] = useState(false)
   const [orderMessage, setOrderMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   // Customer Data Handlers
   const fetchCustomerOrders = useCallback(() => {
@@ -258,7 +259,7 @@ const placeOrder = async () => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const handleLogout = async () => {
+const handleLogout = async () => {
     try { await logout(); navigate('Home'); setAuthMode('Sign in'); setAuthOpen(true) } catch (error) { setActionError(errorMessage(error, 'Logout failed. Please try again.')) }
   }
 
@@ -332,7 +333,29 @@ const placeOrder = async () => {
         <p className="eyebrow">DINE PRIME MEMBERS</p><h2>{authMode === 'Sign in' ? 'Welcome back.' : 'Join the table.'}</h2>
         <p className="muted">{authMode === 'Sign in' ? 'Access your reservations and saved preferences.' : 'Create an account for a more considered visit.'}</p>
         {authMode === 'Register' && <label>Your name<input value={authForm.name} onChange={(event) => setAuthForm({ ...authForm, name: event.target.value })} placeholder="Jordan Lee" /></label>}
-        <label>Email address<input type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" /></label><label>Password<input type="password" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder="••••••••" /></label>
+        <label>Email address<input type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" /></label>
+        
+        <label>
+          Password
+          <div className="password-input-wrapper" style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <input 
+              type={showPassword ? 'text' : 'password'} 
+              value={authForm.password} 
+              onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} 
+              placeholder="••••••••" 
+              style={{ width: '100%', paddingRight: '40px' }}
+            />
+            <button 
+              type="button" 
+              onClick={() => setShowPassword(!showPassword)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              style={{ position: 'absolute', right: '10px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', color: '#666' }}
+            >
+              {showPassword ? 'Hide' : 'Show'}
+            </button>
+          </div>
+        </label>
+
         {authError && <p className="auth-error">{authError}</p>}
         <button className="button button-dark full-width" onClick={submitAuth} disabled={authBusy}>{authBusy ? 'Working...' : authMode}</button>
         <button className="text-button" onClick={() => setAuthMode(authMode === 'Sign in' ? 'Register' : 'Sign in')}>{authMode === 'Sign in' ? 'Need an account? Register' : 'Already a member? Sign in'}</button>
