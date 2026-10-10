@@ -1612,6 +1612,7 @@ function Account({ user, reservations = [], orders = [], onClose, onLogout, onSa
   })
   const [preferences, setPreferences] = useState({ vegetarian: false, outdoor: false })
   const [saving, setSaving] = useState(false)
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
 
   // 1. Synchronize form state whenever user prop updates or loads on refresh
   useEffect(() => {
@@ -1659,8 +1660,37 @@ function Account({ user, reservations = [], orders = [], onClose, onLogout, onSa
               {tab.label} <span>{tab.badge}</span>
             </button>
           ))}
-          <button onClick={onLogout}>Sign out <span>↗</span></button>
+          <button onClick={() => setShowLogoutConfirm(true)}>Sign out <span>↗</span></button>
         </aside>
+
+        {/* Confirmation Modal */}
+        {showLogoutConfirm && (
+          <div className="modal-backdrop">
+            <section className="auth-modal" style={{ textAlign: 'center' }}>
+              <h2>Sign out?</h2>
+              <p className="muted">Are you sure you want to sign out of your account?</p>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                <button 
+                  className="button full-width" 
+                  onClick={() => setShowLogoutConfirm(false)}
+                  style={{ background: '#ddd', color: '#333' }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  className="button button-dark full-width" 
+                  onClick={() => {
+                    setShowLogoutConfirm(false)
+                    onLogout()
+                  }}
+                >
+                  Sign out
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
+
         <div className="account-panel">
           {activeTab === 'profile' && (
             <>
