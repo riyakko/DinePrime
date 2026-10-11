@@ -1,4 +1,4 @@
-```markdown
+
 # Dine Prime 🍽️
 
 A modern, full-stack restaurant reservation and online ordering application built with **React (Vite)** and **PHP (MySQL)**. Dine Prime provides a seamless experience for customers to view the menu, place orders, choose dine-in or takeout preferences, settle bills through multi-channel payment options (Cash, Cards, and E-Wallets with dynamic QR code flows), and track real-time statuses alongside an intuitive staff kitchen display and management system.
