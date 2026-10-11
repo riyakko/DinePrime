@@ -25,6 +25,7 @@ export const updateCategory = (id, category) => request(api.put('/categories/upd
 export const deleteCategory = (id) => request(api.delete('/categories/delete.php', { params: { id } }))
 export const placeOrder = (payload) => request(api.post('/orders/create.php', payload))
 export const getCustomerOrders = (params = {}) => request(api.get('/orders/list.php', { params }))
+export const getStaffOrders = () => request(api.get('/orders/list.php', { params: { all: 1 } }))
 export const getKitchenOrders = () => request(api.get('/orders/list.php', { params: { status: 'Pending,Preparing' } }))
 export const updateOrderStatus = (id, status) => request(api.put('/orders/update-status.php', { status }, { params: { id } }))
 export const getAnalytics = () => request(api.get('/admin/analytics.php'))
@@ -35,10 +36,3 @@ export const getStaffReservations = () => request(api.get('/reservations/list.ph
 export const updateReservationStatus = (reservationId, status) => request(api.post('/reservations/update-status.php', { id: reservationId, status }))
 export const getTableManagement = (date, time) => request(api.get('/tables/manage.php', { params: { date, time } }))
 export const updateTable = (id, table) => request(api.put('/tables/manage.php', table, { params: { id } }))
-export const getStaffOrders = () => {
-  return fetch('/api/orders/list.php?all=1', { credentials: 'include' })
-    .then((res) => {
-      if (!res.ok) throw new Error('Failed to fetch staff orders');
-      return res.json();
-    });
-};

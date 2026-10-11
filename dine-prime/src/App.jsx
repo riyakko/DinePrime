@@ -49,7 +49,12 @@ const CART_STORAGE_KEY = 'dineprime_cart'
 const LEGACY_CART_KEYS = ['dinePrimeCart', 'cart']
 const handleImageError = (event) => { event.currentTarget.onerror = null; event.currentTarget.src = fallbackImage }
 const normalizeMenuItem = (item) => ({ ...item, available: Boolean(Number(item.is_available)), stockQuantity: Number(item.stock_quantity), image: item.image_url })
-const errorMessage = (error, fallback) => error.response?.data?.error || (error.request ? 'The service is unavailable. Check your connection and try again.' : fallback)
+const errorMessage = (error, fallback) => {
+  const responseError = error?.response?.data?.error
+  if (typeof responseError === 'string' && responseError.trim()) return responseError
+  if (error?.request) return 'The service is unavailable. Check your connection and try again.'
+  return error instanceof Error && error.message ? error.message : fallback
+}
 const readStoredCart = () => {
   try {
     const saved = localStorage.getItem(CART_STORAGE_KEY)
@@ -257,7 +262,7 @@ const placeOrder = async () => {
       setCart([])
       persistCart([])
       localStorage.removeItem('dinePrimeTable')
-    } catch (error) {
+    } catch {
       const backendMessage = error.response?.data?.error || error.response?.data?.message
       setOrderMessage(backendMessage || errorMessage(error, 'This order could not be placed.'))
     } finally {
@@ -289,7 +294,7 @@ const handleLogout = async () => {
       const nextView = ['staff', 'admin'].includes(authenticatedUser.role) ? 'Dashboard' : 'Account'
       setView(nextView)
       window.location.hash = routeSlugs[nextView]
-    } catch (error) {
+    } catch {
       setAuthBusy(false)
       setAuthError(errorMessage(error, 'Authentication failed.'))
       return
@@ -320,7 +325,7 @@ const handleLogout = async () => {
               {isStaff && staffRoutes.has(view) && !['Kitchen Display', 'Analytics'].includes(view) ? <ProtectedRoute roles={['staff', 'admin']}><StaffDashboard view={view} navigate={navigate} menuItems={menuItems} categories={categories} orders={orders} reservations={staffReservations} onMenuChange={refreshMenu} onStatusChange={refreshOrders} onReservationChange={refreshReservations} onError={setActionError} /></ProtectedRoute> : null}
               {role === 'customer' && view === 'Home' && <Home goTo={navigate} />}
               {role === 'customer' && view === 'Menu' && <Menu items={menuItems} loading={menuLoading} error={menuError} filter={menuFilter} setFilter={setMenuFilter} search={menuSearch} setSearch={setMenuSearch} addToCart={addToCart} />}
-              {role === 'customer' && view === 'Order' && <Order cart={cart} total={total} updateQuantity={updateQuantity} updateInstructions={updateInstructions} goTo={navigate} orderMessage={orderMessage} placeOrder={placeOrder} isSubmitting={isSubmitting} />}
+              {role === 'customer' && view === 'Order' && <Order cart={cart} total={total} updateQuantity={updateQuantity} updateInstructions={updateInstructions} goTo={navigate} onOrderCompleted={() => { setCart([]); persistCart([]) }} orderMessage={orderMessage} placeOrder={placeOrder} isSubmitting={isSubmitting} />}
               {role === 'customer' && view === 'Reservations' && <LiveReservations user={user} menuItems={menuItems} goTo={navigate} onError={setActionError} onReservationCreated={fetchCustomerReservations} />}
               {role === 'customer' && view === 'Account' && (
                 <Account
@@ -588,6 +593,7 @@ function Order({
   updateQuantity,
   updateInstructions,
   goTo,
+  onOrderCompleted,
   orderMessage,
   placeOrder,
   isSubmitting = false,
@@ -784,8 +790,11 @@ const executeOrderPlacement = async (paymentInfo) => {
     }
 
     localStorage.removeItem('dineprime_cart');
+    localStorage.removeItem('dinePrimeCart');
+    localStorage.removeItem('cart');
     localStorage.removeItem('dinePrimeTable');
     localStorage.removeItem('dinePrimeTableId');
+    onOrderCompleted?.();
     setShowPaymentModal(false);
     setShowQRModal(false);
 
@@ -1338,9 +1347,10 @@ function LiveReservations({ user, menuItems, goTo, onError }) {
   )
 }
 
-const playAlertSound = () => {
+const playAlertSound = (audioContext) => {
+  if (!audioContext || audioContext.state !== 'running') return
+
   try {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)()
     const oscillator = audioContext.createOscillator()
     const gainNode = audioContext.createGain()
     
@@ -1355,8 +1365,8 @@ const playAlertSound = () => {
     
     oscillator.start(audioContext.currentTime)
     oscillator.stop(audioContext.currentTime + 0.3)
-  } catch (error) {
-    console.error('Audio alert failed:', error)
+  } catch {
+    // Audio is optional and can be unavailable on devices without Web Audio support.
   }
 }
 
@@ -1374,10 +1384,27 @@ function StaffDashboard({
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const previousOrderIds = useRef(new Set())
+  const audioContextRef = useRef(null)
 
   const isMenu = view === 'Menu management'
   const isReservations = view === 'Reservation management'
   const isInventory = view === 'Inventory'
+
+  useEffect(() => {
+    const unlockAudio = () => {
+      if (!audioContextRef.current) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext
+        if (AudioContext) audioContextRef.current = new AudioContext()
+      }
+      audioContextRef.current?.resume().catch(() => {})
+    }
+
+    window.addEventListener('pointerdown', unlockAudio)
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio)
+      audioContextRef.current?.close().catch(() => {})
+    }
+  }, [])
 
   const loadOrders = () => {
     getStaffOrders()
@@ -1387,7 +1414,7 @@ function StaffDashboard({
 
         newOrderIds.forEach((id) => {
           if (!previousOrderIds.current.has(id)) {
-            playAlertSound()
+            playAlertSound(audioContextRef.current)
           }
         })
 
@@ -1486,7 +1513,7 @@ function StaffDashboard({
               orders={orders.slice(0, 5)}
               navigate={navigate}
               onStatusChange={(id, status) => {
-                updateOrderStatus(id, status).then(loadOrders).catch(onError)
+                loadOrders()
                 if (onStatusChange) onStatusChange(id, status)
               }}
               onError={onError}
@@ -1518,7 +1545,7 @@ function StaffDashboard({
           navigate={navigate}
           detailed
           onStatusChange={(id, status) => {
-            updateOrderStatus(id, status).then(loadOrders).catch(onError)
+            loadOrders()
             if (onStatusChange) onStatusChange(id, status)
           }}
           onError={onError}
@@ -1630,7 +1657,7 @@ function StaffOrderTable({ orders = [], navigate, detailed = false, onStatusChan
   const statuses = ['Pending', 'Confirmed', 'Preparing', 'Ready', 'Completed', 'Cancelled'];
   const changeStatus = (id, status) =>
     updateOrderStatus(id, status)
-      .then(onStatusChange)
+      .then(() => onStatusChange?.(id, status))
       .catch((error) => onError(errorMessage(error, 'Order status could not be updated.')));
 
   return (

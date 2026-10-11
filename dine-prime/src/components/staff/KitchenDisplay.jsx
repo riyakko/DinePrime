@@ -6,9 +6,10 @@ const nextStatus = { Pending: 'Preparing', Preparing: 'Ready' }
 const elapsedMinutes = (createdAt) => 
   Math.max(0, Math.floor((Date.now() - new Date(createdAt.replace(' ', 'T') + 'Z').getTime()) / 60000))
 
-const playAlertSound = () => {
+const playAlertSound = (audioContext) => {
+  if (!audioContext || audioContext.state !== 'running') return
+
   try {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)()
     const oscillator = audioContext.createOscillator()
     const gainNode = audioContext.createGain()
     
@@ -23,8 +24,8 @@ const playAlertSound = () => {
     
     oscillator.start(audioContext.currentTime)
     oscillator.stop(audioContext.currentTime + 0.3)
-  } catch (error) {
-    console.error('Audio alert failed:', error)
+  } catch {
+    // Audio is optional and can be unavailable on devices without Web Audio support.
   }
 }
 
@@ -32,8 +33,27 @@ export default function KitchenDisplay({ onError }) {
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const previousOrderIds = useRef(new Set())
+  const audioContextRef = useRef(null)
+  const pollingStopped = useRef(false)
+
+  useEffect(() => {
+    const unlockAudio = () => {
+      if (!audioContextRef.current) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext
+        if (AudioContext) audioContextRef.current = new AudioContext()
+      }
+      audioContextRef.current?.resume().catch(() => {})
+    }
+
+    window.addEventListener('pointerdown', unlockAudio)
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio)
+      audioContextRef.current?.close().catch(() => {})
+    }
+  }, [])
   
   const load = () => 
+    pollingStopped.current ? Promise.resolve() :
     getKitchenOrders()
       .then((data) => {
         const newOrders = data.orders || []
@@ -42,14 +62,21 @@ export default function KitchenDisplay({ onError }) {
         // Play sound when new ticket arrives
         newOrderIds.forEach(id => {
           if (!previousOrderIds.current.has(id)) {
-            playAlertSound()
+            playAlertSound(audioContextRef.current)
           }
         })
         
         previousOrderIds.current = newOrderIds
         setOrders(newOrders)
       })
-      .catch((error) => onError(error.response?.data?.error || 'Kitchen orders could not be loaded.'))
+      .catch((error) => {
+        if (error.response?.status === 401) {
+          pollingStopped.current = true
+          onError('Your staff session has expired. Please sign in again.')
+          return
+        }
+        onError(error.response?.data?.error || 'Kitchen orders could not be loaded.')
+      })
       .finally(() => setLoading(false))
   
   useEffect(() => { 

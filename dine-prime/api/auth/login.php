@@ -1,12 +1,4 @@
 <?php
-// Ensure session is active before regenerating ID or setting $_SESSION
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-// Set standard JSON response header immediately
-header('Content-Type: application/json; charset=utf-8');
-
 try {
     require_once __DIR__ . '/../db.php';
 
