@@ -1,6 +1,22 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import './App.css'
-import { checkTableAvailability, createMenuItem, deleteMenuItem, getCategories, getCustomerOrders, getMenuItems, getReservations, getStaffReservations, placeOrder as submitOrder, submitReservation, updateMenuItem, updateOrderStatus, updateReservationStatus } from './api'
+import { 
+  checkTableAvailability, 
+  createMenuItem, 
+  deleteMenuItem, 
+  getCategories, 
+  getCustomerOrders, 
+  getKitchenOrders, 
+  getStaffOrders, 
+  getMenuItems, 
+  getReservations, 
+  getStaffReservations, 
+  placeOrder as submitOrder, 
+  submitReservation, 
+  updateMenuItem, 
+  updateOrderStatus, 
+  updateReservationStatus 
+} from './api'
 import ProtectedRoute from './components/ProtectedRoute'
 import MenuItemModal, { ConfirmModal } from './components/staff/MenuItemModal'
 import KitchenDisplay from './components/staff/KitchenDisplay'
@@ -1170,6 +1186,7 @@ function LiveReservations({ user, menuItems, goTo, onError }) {
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  
   const today = new Date()
   const tomorrowDate = new Date(today)
   tomorrowDate.setDate(tomorrowDate.getDate() + 1)
@@ -1179,11 +1196,10 @@ function LiveReservations({ user, menuItems, goTo, onError }) {
   const [time, setTime] = useState('18:00')
   const [partySize, setPartySize] = useState(2)
 
-useEffect(() => { 
+  useEffect(() => { 
     setLoading(true) 
     checkTableAvailability(date, time, partySize)
       .then((data) => { 
-        // Normalize table labels so every item consistently uses "Table XX"
         const formattedTables = (data.tables || []).map((t) => {
           const rawNum = String(t.table_number || t.number || t.id).replace(/\D/g, '')
           const formattedNumber = rawNum ? `Table ${rawNum.padStart(2, '0')}` : t.table_number
@@ -1207,47 +1223,219 @@ useEffect(() => {
           }
         }
       })
-      .catch((error) => {
+      .catch(() => {
         if (typeof onError === 'function') onError('Could not fetch table availability.')
       })
       .finally(() => setLoading(false))
   }, [date, time, partySize])
-  const toggleAddOn = (item) => setAddOns((current) => current.some((entry) => entry.menu_item_id === item.id) ? current.filter((entry) => entry.menu_item_id !== item.id) : [...current, { menu_item_id: item.id, quantity: 1, name: item.name, price: Number(item.price) }])
+
+  const toggleAddOn = (item) => 
+    setAddOns((current) => 
+      current.some((entry) => entry.menu_item_id === item.id) 
+        ? current.filter((entry) => entry.menu_item_id !== item.id) 
+        : [...current, { menu_item_id: item.id, quantity: 1, name: item.name, price: Number(item.price) }]
+    )
+
   const addonTotal = addOns.reduce((sum, item) => sum + item.price * item.quantity, 0)
-  const reserve = async () => { if (!user) { onError('Please sign in before making a reservation.'); return } if (!selectedTable) { setMessage('Choose an available table before continuing.'); return } setSubmitting(true); try { await submitReservation({ reservation_date: date, reservation_time: time, party_size: partySize, table_id: selectedTable.id, add_ons: addOns.map(({ menu_item_id, quantity }) => ({ menu_item_id, quantity })) }); setMessage('Reservation request submitted. Staff will confirm your table shortly.'); setSelectedTable(null) } catch (error) { setMessage(errorMessage(error, 'The reservation could not be created. The table may have just been booked.')) } finally { setSubmitting(false) } }
+
+  const reserve = async () => { 
+    if (!user) { onError('Please sign in before making a reservation.'); return } 
+    if (!selectedTable) { setMessage('Choose an available table before continuing.'); return } 
+    setSubmitting(true); 
+    try { 
+      await submitReservation({ 
+        reservation_date: date, 
+        reservation_time: time, 
+        party_size: partySize, 
+        table_id: selectedTable.id, 
+        add_ons: addOns.map(({ menu_item_id, quantity }) => ({ menu_item_id, quantity })) 
+      }); 
+      setMessage('Reservation request submitted. Staff will confirm your table shortly.'); 
+      setSelectedTable(null) 
+    } catch (error) { 
+      setMessage(errorMessage(error, 'The reservation could not be created. The table may have just been booked.')) 
+    } finally { 
+      setSubmitting(false) 
+    } 
+  }
+
   const timeSlots = [['17:00', '5:00 PM'], ['17:30', '5:30 PM'], ['18:00', '6:00 PM'], ['18:30', '6:30 PM'], ['19:00', '7:00 PM'], ['19:30', '7:30 PM'], ['20:00', '8:00 PM'], ['20:30', '8:30 PM'], ['21:00', '9:00 PM'], ['21:30', '9:30 PM']]
-  return <section className="reservation-page content-width"><div className="section-heading"><p className="eyebrow">A SEAT AT THE TABLE</p><h1>Reserve a<br /><em>moment.</em></h1><p className="muted">Choose your date, time, table, and any dishes<br />you would like waiting when you arrive.</p></div><div className="reservation-layout"><div className="reservation-form"><div className="form-row"><label>Date<input type="date" min={tomorrow} value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Time<select value={time} onChange={(event) => setTime(event.target.value)}>{timeSlots.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div><label>Party size<div className="segmented">{[2, 3, 4, 5].map((size) => <button key={size} className={partySize === size ? 'chosen' : ''} onClick={() => setPartySize(size)}>{size === 5 ? '5+' : `${size} guests`}</button>)}</div></label><p className="eyebrow table-label">AVAILABLE TABLES <span>{loading ? 'CHECKING...' : 'SELECT ONE'}</span></p><div className="table-map live-table-map">{tables.map((table) => <button key={table.id} disabled={table.status !== 'Available' || !table.eligible} className={`table ${table.capacity === 2 ? 'round' : 'square'} ${selectedTable?.id === table.id ? 'chosen' : ''} ${table.status === 'Reserved' || !table.eligible ? 'occupied' : ''}`} onClick={() => setSelectedTable(table)}>{table.table_number}<small>{table.capacity} seats</small><small>{table.status === 'Reserved' ? 'Reserved' : !table.eligible ? 'Too small' : table.location_description}</small></button>)}</div><div className="legend"><span>Available</span><span>Selected</span><span>Reserved</span></div><div className="optional"><p className="eyebrow">OPTIONAL ADD-ON</p><b>Pre-order for the table</b><small>Choose something to have waiting when you arrive.</small><div className="addon-list">{menuItems.filter((item) => item.available && item.stockQuantity > 0).slice(0, 4).map((item) => <label key={item.id}><input type="checkbox" checked={addOns.some((entry) => entry.menu_item_id === item.id)} onChange={() => toggleAddOn(item)} />{item.name}<span>${item.price}</span></label>)}</div></div>{message && <p className="inline-error" role="alert">{message}</p>}</div><aside className="reservation-summary"><p className="eyebrow">YOUR RESERVATION</p><h2>{date}</h2><hr /><div><span>Time</span><b>{timeSlots.find(([value]) => value === time)?.[1] || time}</b></div><div><span>Party</span><b>{partySize} guests</b></div><div><span>Table</span><b>{selectedTable ? `${selectedTable.table_number} · ${selectedTable.location_description}` : 'Select a table'}</b></div><div><span>Add-ons</span><b>${addonTotal.toFixed(2)}</b></div>{addOns.map((item) => <div className="summary-row" key={item.menu_item_id}><span>{item.name}</span><b>${item.price}</b></div>)}<button className="button button-dark full-width" disabled={submitting} onClick={reserve}>{submitting ? 'Submitting...' : 'Reserve table →'}</button><button className="quiet-link" onClick={() => goTo('Home')}>← Return to dining</button></aside></div></section>
+
+  return (
+    <section className="reservation-page content-width">
+      <div className="section-heading">
+        <p className="eyebrow">A SEAT AT THE TABLE</p>
+        <h1>Reserve a<br /><em>moment.</em></h1>
+        <p className="muted">Choose your date, time, table, and any dishes<br />you would like waiting when you arrive.</p>
+      </div>
+      <div className="reservation-layout">
+        <div className="reservation-form">
+          <div className="form-row">
+            <label>Date<input type="date" min={tomorrow} value={date} onChange={(event) => setDate(event.target.value)} /></label>
+            <label>Time<select value={time} onChange={(event) => setTime(event.target.value)}>{timeSlots.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          </div>
+          <label>Party size
+            <div className="segmented">
+              {[2, 3, 4, 5].map((size) => (
+                <button key={size} className={partySize === size ? 'chosen' : ''} onClick={() => setPartySize(size)}>
+                  {size === 5 ? '5+' : `${size} guests`}
+                </button>
+              ))}
+            </div>
+          </label>
+          <p className="eyebrow table-label">AVAILABLE TABLES <span>{loading ? 'CHECKING...' : 'SELECT ONE'}</span></p>
+          <div className="table-map live-table-map">
+            {tables.map((table) => (
+              <button 
+                key={table.id} 
+                disabled={table.status !== 'Available' || !table.eligible} 
+                className={`table ${table.capacity === 2 ? 'round' : 'square'} ${selectedTable?.id === table.id ? 'chosen' : ''} ${table.status === 'Reserved' || !table.eligible ? 'occupied' : ''}`} 
+                onClick={() => setSelectedTable(table)}
+              >
+                {table.table_number}
+                <small>{table.capacity} seats</small>
+                <small>{table.status === 'Reserved' ? 'Reserved' : !table.eligible ? 'Too small' : table.location_description}</small>
+              </button>
+            ))}
+          </div>
+          <div className="legend"><span>Available</span><span>Selected</span><span>Reserved</span></div>
+          <div className="optional">
+            <p className="eyebrow">OPTIONAL ADD-ON</p>
+            <b>Pre-order for the table</b>
+            <small>Choose something to have waiting when you arrive.</small>
+            <div className="addon-list">
+              {menuItems.filter((item) => item.available && item.stockQuantity > 0).slice(0, 4).map((item) => (
+                <label key={item.id}>
+                  <input type="checkbox" checked={addOns.some((entry) => entry.menu_item_id === item.id)} onChange={() => toggleAddOn(item)} />
+                  {item.name}<span>${item.price}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          {message && <p className="inline-error" role="alert">{message}</p>}
+        </div>
+        <aside className="reservation-summary">
+          <p className="eyebrow">YOUR RESERVATION</p>
+          <h2>{date}</h2>
+          <hr />
+          <div><span>Time</span><b>{timeSlots.find(([value]) => value === time)?.[1] || time}</b></div>
+          <div><span>Party</span><b>{partySize} guests</b></div>
+          <div><span>Table</span><b>{selectedTable ? `${selectedTable.table_number} · ${selectedTable.location_description}` : 'Select a table'}</b></div>
+          <div><span>Add-ons</span><b>${addonTotal.toFixed(2)}</b></div>
+          {addOns.map((item) => (
+            <div className="summary-row" key={item.menu_item_id}>
+              <span>{item.name}</span>
+              <b>${item.price}</b>
+            </div>
+          ))}
+          <button className="button button-dark full-width" disabled={submitting} onClick={reserve}>
+            {submitting ? 'Submitting...' : 'Reserve table →'}
+          </button>
+          <button className="quiet-link" onClick={() => goTo('Home')}>← Return to dining</button>
+        </aside>
+      </div>
+    </section>
+  )
 }
 
-function StaffDashboard({ view, navigate, menuItems = [], categories = [], orders = [], reservations = [], onMenuChange, onStatusChange, onReservationChange, onError }) {
-  const isMenu = view === 'Menu management';
-  const isReservations = view === 'Reservation management';
-  const isInventory = view === 'Inventory';
+const playAlertSound = () => {
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)()
+    const oscillator = audioContext.createOscillator()
+    const gainNode = audioContext.createGain()
+    
+    oscillator.connect(gainNode)
+    gainNode.connect(audioContext.destination)
+    
+    oscillator.frequency.value = 800
+    oscillator.type = 'sine'
+    
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3)
+    
+    oscillator.start(audioContext.currentTime)
+    oscillator.stop(audioContext.currentTime + 0.3)
+  } catch (error) {
+    console.error('Audio alert failed:', error)
+  }
+}
 
-  // Date boundaries for metrics
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+function StaffDashboard({
+  view,
+  navigate,
+  menuItems = [],
+  categories = [],
+  reservations = [],
+  onMenuChange,
+  onStatusChange,
+  onReservationChange,
+  onError,
+}) {
+  const [orders, setOrders] = useState([])
+  const [loading, setLoading] = useState(true)
+  const previousOrderIds = useRef(new Set())
 
-  const dayOfWeek = now.getDay();
-  const distanceToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - distanceToMonday);
+  const isMenu = view === 'Menu management'
+  const isReservations = view === 'Reservation management'
+  const isInventory = view === 'Inventory'
 
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const loadOrders = () => {
+    getStaffOrders()
+      .then((data) => {
+        const newOrders = data.orders || []
+        const newOrderIds = new Set(newOrders.map((o) => o.id))
 
-  // Revenue aggregations
+        newOrderIds.forEach((id) => {
+          if (!previousOrderIds.current.has(id)) {
+            playAlertSound()
+          }
+        })
+
+        previousOrderIds.current = newOrderIds
+        setOrders(newOrders)
+      })
+      .catch((error) => {
+        console.error('Failed to load dashboard orders:', error)
+        if (typeof onError === 'function') {
+          onError('Orders could not be loaded.')
+        }
+      })
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    loadOrders()
+    const interval = setInterval(loadOrders, 5000)
+
+    const handleInstantUpdate = () => loadOrders()
+    window.addEventListener('orderCreated', handleInstantUpdate)
+
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('orderCreated', handleInstantUpdate)
+    }
+  }, [])
+
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+
   const totalRevenue = orders.reduce((sum, order) => {
-    if (order.status === 'Cancelled' || order.status === 'cancelled') return sum;
-    return sum + Number(order.total_amount || 0);
-  }, 0);
+    if (order.status === 'Cancelled' || order.status === 'cancelled') return sum
+    return sum + Number(order.total_amount || 0)
+  }, 0)
 
   const todayOrders = orders.filter((order) => {
-    if (!order.created_at) return false;
-    const orderDate = new Date(order.created_at.replace(' ', 'T'));
-    return orderDate >= startOfToday;
-  });
+    if (!order.created_at) return false
+    const orderDate = new Date(order.created_at.replace(' ', 'T'))
+    return orderDate >= startOfToday
+  })
 
-  const pendingOrdersCount = orders.filter((order) => order.status === 'Pending' || order.status === 'pending').length;
-  const lowStockCount = menuItems.filter((item) => (item.stockQuantity ?? item.stock_quantity ?? 0) < 5).length;
+  const pendingOrdersCount = orders.filter(
+    (order) => order.status === 'Pending' || order.status === 'pending'
+  ).length
+  const lowStockCount = menuItems.filter(
+    (item) => (item.stockQuantity ?? item.stock_quantity ?? 0) < 5
+  ).length
 
   return (
     <section className="staff-page content-width">
@@ -1265,14 +1453,23 @@ function StaffDashboard({ view, navigate, menuItems = [], categories = [], order
             )}
           </h1>
           <p className="muted">
-            {now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} · Service in progress
+            {now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} ·
+            Service in progress
           </p>
         </div>
         <button
           className="button button-dark"
-          onClick={() => navigate(isMenu ? 'Menu management' : isReservations ? 'Reservation management' : 'Orders')}
+          onClick={() =>
+            navigate(
+              isMenu ? 'Menu management' : isReservations ? 'Reservation management' : 'Orders'
+            )
+          }
         >
-          {isMenu ? 'Add menu item +' : isReservations ? 'Refresh reservations →' : 'View all orders →'}
+          {isMenu
+            ? 'Add menu item +'
+            : isReservations
+              ? 'Refresh reservations →'
+              : 'View all orders →'}
         </button>
       </div>
 
@@ -1285,7 +1482,15 @@ function StaffDashboard({ view, navigate, menuItems = [], categories = [], order
             <Metric label="Low stock" value={lowStockCount} detail="Review inventory" />
           </div>
           <div className="staff-columns">
-            <StaffOrderTable orders={orders.slice(0, 5)} navigate={navigate} onStatusChange={onStatusChange} onError={onError} />
+            <StaffOrderTable
+              orders={orders.slice(0, 5)}
+              navigate={navigate}
+              onStatusChange={(id, status) => {
+                updateOrderStatus(id, status).then(loadOrders).catch(onError)
+                if (onStatusChange) onStatusChange(id, status)
+              }}
+              onError={onError}
+            />
             <StaffPanel title="Service pulse">
               <div className="pulse-row">
                 <span>Kitchen</span>
@@ -1307,12 +1512,36 @@ function StaffDashboard({ view, navigate, menuItems = [], categories = [], order
         </>
       )}
 
-      {view === 'Orders' && <StaffOrderTable orders={orders} navigate={navigate} detailed onStatusChange={onStatusChange} onError={onError} />}
-      {isReservations && <StaffReservations reservations={reservations} onStatusChange={onReservationChange} onError={onError} />}
-      {isMenu && <MenuManagement items={menuItems} categories={categories} onMenuChange={onMenuChange} onError={onError} />}
+      {view === 'Orders' && (
+        <StaffOrderTable
+          orders={orders}
+          navigate={navigate}
+          detailed
+          onStatusChange={(id, status) => {
+            updateOrderStatus(id, status).then(loadOrders).catch(onError)
+            if (onStatusChange) onStatusChange(id, status)
+          }}
+          onError={onError}
+        />
+      )}
+      {isReservations && (
+        <StaffReservations
+          reservations={reservations}
+          onStatusChange={onReservationChange}
+          onError={onError}
+        />
+      )}
+      {isMenu && (
+        <MenuManagement
+          items={menuItems}
+          categories={categories}
+          onMenuChange={onMenuChange}
+          onError={onError}
+        />
+      )}
       {isInventory && <InventoryManagement items={menuItems} />}
     </section>
-  );
+  )
 }
 
 function StaffReservations({ reservations = [], onStatusChange, onError }) {
@@ -1590,11 +1819,12 @@ function InventoryManagement({ items = [] }) {
       </div>
       {items.map((item) => {
         const qty = item.stockQuantity ?? item.stock_quantity ?? 0;
+        const stockPercent = Math.min(100, (qty / 20) * 100);
         return (
           <div className="inventory-row" key={item.id}>
             <span>{item.name}</span>
             <div className="stock-bar">
-              <i style={{ width: `${Math.min(100, qty * 5)}%` }} />
+              <i style={{ width: `${stockPercent}%` }} />
             </div>
             <span>{qty} units</span>
           </div>

@@ -37,7 +37,7 @@ const DB_PASS = 'NsUHO1M6g9i';
 // 3. Configure Sessions
 if (session_status() === PHP_SESSION_NONE) {
     session_set_cookie_params([
-        'lifetime' => 60 * 60 * 24 * 7,
+        'lifetime' => 60 * 60 * 24 * 7, // 7 days
         'path' => '/',
         'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
         'httponly' => true,

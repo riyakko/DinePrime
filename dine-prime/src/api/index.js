@@ -35,3 +35,10 @@ export const getStaffReservations = () => request(api.get('/reservations/list.ph
 export const updateReservationStatus = (reservationId, status) => request(api.post('/reservations/update-status.php', { id: reservationId, status }))
 export const getTableManagement = (date, time) => request(api.get('/tables/manage.php', { params: { date, time } }))
 export const updateTable = (id, table) => request(api.put('/tables/manage.php', table, { params: { id } }))
+export const getStaffOrders = () => {
+  return fetch('/api/orders/list.php?all=1', { credentials: 'include' })
+    .then((res) => {
+      if (!res.ok) throw new Error('Failed to fetch staff orders');
+      return res.json();
+    });
+};
