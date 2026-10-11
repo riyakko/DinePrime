@@ -127,6 +127,17 @@ function App() {
   }, [menuSearch])
 
   useEffect(() => {
+    const refreshMenuAvailability = () => {
+      getMenuItems({ search: menuSearch })
+        .then((data) => setMenuItems((data.items || []).map(normalizeMenuItem)))
+        .catch((error) => console.error('Failed to refresh menu availability:', error))
+    }
+
+    const interval = setInterval(refreshMenuAvailability, 5000)
+    return () => clearInterval(interval)
+  }, [menuSearch])
+
+  useEffect(() => {
     if (isStaff) getCustomerOrders().then((data) => setOrders(data.orders || [])).catch((error) => setActionError(errorMessage(error, 'Orders could not be loaded.')))
   }, [isStaff])
 
@@ -325,7 +336,7 @@ const handleLogout = async () => {
               {isStaff && staffRoutes.has(view) && !['Kitchen Display', 'Analytics'].includes(view) ? <ProtectedRoute roles={['staff', 'admin']}><StaffDashboard view={view} navigate={navigate} menuItems={menuItems} categories={categories} orders={orders} reservations={staffReservations} onMenuChange={refreshMenu} onStatusChange={refreshOrders} onReservationChange={refreshReservations} onError={setActionError} /></ProtectedRoute> : null}
               {role === 'customer' && view === 'Home' && <Home goTo={navigate} />}
               {role === 'customer' && view === 'Menu' && <Menu items={menuItems} loading={menuLoading} error={menuError} filter={menuFilter} setFilter={setMenuFilter} search={menuSearch} setSearch={setMenuSearch} addToCart={addToCart} />}
-              {role === 'customer' && view === 'Order' && <Order cart={cart} total={total} updateQuantity={updateQuantity} updateInstructions={updateInstructions} goTo={navigate} onOrderCompleted={() => { setCart([]); persistCart([]) }} orderMessage={orderMessage} placeOrder={placeOrder} isSubmitting={isSubmitting} />}
+              {role === 'customer' && view === 'Order' && <Order cart={cart} total={total} updateQuantity={updateQuantity} updateInstructions={updateInstructions} goTo={navigate} onOrderCompleted={() => { setCart([]); persistCart([]); refreshMenu() }} orderMessage={orderMessage} placeOrder={placeOrder} isSubmitting={isSubmitting} />}
               {role === 'customer' && view === 'Reservations' && <LiveReservations user={user} menuItems={menuItems} goTo={navigate} onError={setActionError} onReservationCreated={fetchCustomerReservations} />}
               {role === 'customer' && view === 'Account' && (
                 <Account
